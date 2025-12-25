@@ -1,16 +1,43 @@
-## Hi there 👋
+# Hey, I'm Guru 👋
 
-<!--
-**gurul/gurul** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
+I'm a Computer Science student at UW Seattle building technology that bridges communities. Currently obsessing over **storeybox** — a physical storytelling booth that captures authentic moments, not content.
 
-Here are some ideas to get you started:
+> *"Presence, not performance."*
 
-- 🔭 I’m currently working on ...
-- 🌱 I’m currently learning ...
-- 👯 I’m looking to collaborate on ...
-- 🤔 I’m looking for help with ...
-- 💬 Ask me about ...
-- 📫 How to reach me: ...
-- 😄 Pronouns: ...
-- ⚡ Fun fact: ...
--->
+---
+
+## 🔥 Coding Streak
+
+<!--START_SECTION:streak-->
+**0** days consecutive coding
+<!--END_SECTION:streak-->
+
+<sub>Last updated: Never</sub>
+
+---
+
+## 🛠️ Languages I Work With
+
+<!--START_SECTION:languages-->
+| Language | Usage |
+|----------|-------|
+| Loading... | ... |
+<!--END_SECTION:languages-->
+
+
+<details>
+<summary>📊 More Stats</summary>
+
+<!--START_SECTION:stats-->
+```
+Commits this year: Loading...
+PRs opened: Loading...
+Issues opened: Loading...
+```
+<!--END_SECTION:stats-->
+
+</details>
+
+---
+
+*From Tenali, India → Seattle, WA. Preserving human context at scale.*
