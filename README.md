@@ -12,7 +12,6 @@ I'm a Computer Science student at UW Seattle building technology that bridges co
 **3** days consecutive coding 🔥
 
 ```
-[███░░░░░░░░░░░░░░░░░░░░░░░░░░░] Keep it going!
 ```
 
 <sub>Total contributions this year: **117**</sub>
