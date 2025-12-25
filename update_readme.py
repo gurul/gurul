@@ -40,7 +40,7 @@ def get_contribution_data():
             repositories(first: 100, ownerAffiliations: OWNER, orderBy: {field: UPDATED_AT, direction: DESC}) {
                 nodes {
                     name
-                    languages(first: 10, orderBy: {field: SIZE, direction: DESC}) {
+                    languages(first: 50, orderBy: {field: SIZE, direction: DESC}) {
                         edges {
                             size
                             node {
@@ -145,7 +145,7 @@ def get_language_stats(contribution_data):
             return {}
         
         language_stats = {}
-        for lang, bytes_count in sorted_langs[:8]:  # Top 8 languages
+        for lang, bytes_count in sorted_langs:  # All languages
             percentage = (bytes_count / total_bytes) * 100
             language_stats[lang] = percentage
         
@@ -185,29 +185,10 @@ def generate_languages_section(language_stats):
     if not language_stats:
         return "No language data available"
     
-    # Language colors (subset of common ones)
-    colors = {
-        "TypeScript": "🔵",
-        "JavaScript": "🟡",
-        "Python": "🟢",
-        "Swift": "🟠",
-        "Rust": "🟤",
-        "Go": "🔵",
-        "Java": "🟤",
-        "C++": "🔴",
-        "C": "⚫",
-        "HTML": "🟠",
-        "CSS": "🟣",
-        "Shell": "🟢",
-        "Ruby": "🔴",
-        "Kotlin": "🟣",
-    }
-    
     rows = ["| Language | Usage |", "|----------|-------|"]
     
     for lang, percentage in language_stats.items():
-        icon = colors.get(lang, "⬜")
-        rows.append(f"| {icon} {lang} | {percentage:.1f}% |")
+        rows.append(f"| {lang} | {percentage:.1f}% |")
     
     return "\n".join(rows)
 
@@ -219,7 +200,7 @@ def generate_stats_section(total, prs, issues):
 - Issues opened: {issues}"""
 
 
-def update_readme(streak_section, languages_section, stats_section):
+def update_readme(streak_section, languages_section):
     """Update the README.md with new sections."""
     readme_path = "README.md"
     
@@ -238,14 +219,6 @@ def update_readme(streak_section, languages_section, stats_section):
     content = re.sub(
         r"<!--START_SECTION:languages-->.*?<!--END_SECTION:languages-->",
         f"<!--START_SECTION:languages-->\n{languages_section}\n<!--END_SECTION:languages-->",
-        content,
-        flags=re.DOTALL
-    )
-    
-    # Update stats section
-    content = re.sub(
-        r"<!--START_SECTION:stats-->.*?<!--END_SECTION:stats-->",
-        f"<!--START_SECTION:stats-->\n{stats_section}\n<!--END_SECTION:stats-->",
         content,
         flags=re.DOTALL
     )
@@ -280,16 +253,12 @@ def main():
     language_stats = get_language_stats(data)
     print(f"Languages found: {list(language_stats.keys())}")
     
-    print("Getting additional stats...")
-    total, prs, issues = get_additional_stats(data)
-    
     print("Generating sections...")
     streak_section = generate_streak_section(streak, total_contributions)
     languages_section = generate_languages_section(language_stats)
-    stats_section = generate_stats_section(total, prs, issues)
     
     print("Updating README...")
-    update_readme(streak_section, languages_section, stats_section)
+    update_readme(streak_section, languages_section)
     
     print("Done!")
 
