@@ -53,4 +53,4 @@ Issues opened: 0
 
 ---
 
-*From Tenali, India → Seattle, WA. Preserving human context at scale.*
+*From Tenali, India → Seattle, WA.*
