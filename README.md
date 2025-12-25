@@ -1,6 +1,6 @@
 # Hey, I'm Guru 👋
 
-I'm a Computer Science student at UW Seattle building technology that bridges communities. Currently obsessing over **storeybox** — a physical storytelling booth that captures authentic moments, not content.
+I'm a Computer Science student at UW Seattle building technology that bridges communities. Currently obsessing over **storeybox** — a physical storytelling booth that captures authentic moments.
 
 > *"In the depth of winter, I finally learned that within me there lay an invincible summer."*
 
