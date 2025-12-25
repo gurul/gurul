@@ -37,7 +37,7 @@ def get_contribution_data():
                     }
                 }
             }
-            repositories(first: 100, ownerAffiliations: OWNER, orderBy: {field: UPDATED_AT, direction: DESC}) {
+            repositories(first: 100, ownerAffiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER], privacy: null, orderBy: {field: UPDATED_AT, direction: DESC}) {
                 nodes {
                     name
                     languages(first: 50, orderBy: {field: SIZE, direction: DESC}) {
