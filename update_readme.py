@@ -78,7 +78,6 @@ def calculate_streak(contribution_data):
         calendar = contribution_data["data"]["user"]["contributionsCollection"]["contributionCalendar"]
         total_contributions = calendar["totalContributions"]
         
-        # Flatten all contribution days
         all_days = []
         for week in calendar["weeks"]:
             for day in week["contributionDays"]:
@@ -87,17 +86,14 @@ def calculate_streak(contribution_data):
                     "count": day["contributionCount"]
                 })
         
-        # Sort by date descending
         all_days.sort(key=lambda x: x["date"], reverse=True)
         
-        # Calculate current streak
         streak = 0
         today = datetime.now().date()
         
         for i, day in enumerate(all_days):
             expected_date = today - timedelta(days=i)
             
-            # Allow for today not having contributions yet
             if i == 0 and day["date"] == today and day["count"] == 0:
                 continue
             
@@ -130,16 +126,14 @@ def get_language_stats(contribution_data):
                 for lang in repo["languages"]["edges"]:
                     language_bytes[lang["node"]["name"]] += lang["size"]
         
-        # Sort by usage and get top languages
         sorted_langs = sorted(language_bytes.items(), key=lambda x: x[1], reverse=True)
         
-        # Calculate percentages
         total_bytes = sum(language_bytes.values())
         if total_bytes == 0:
             return {}
         
         language_stats = {}
-        for lang, bytes_count in sorted_langs:  # All languages
+        for lang, bytes_count in sorted_langs:
             percentage = (bytes_count / total_bytes) * 100
             language_stats[lang] = percentage
         
@@ -150,52 +144,35 @@ def get_language_stats(contribution_data):
         return {}
 
 
-def generate_streak_section(streak, total_contributions):
-    """Generate the streak display section."""
-    section = f"""**{streak}** days consecutive coding
-
-Total contributions this year: **{total_contributions}**"""
+def generate_stats_section(streak, total_contributions, language_stats):
+    """Generate compact stats section."""
+    # First line: streak and contributions
+    line1 = f"**{streak}** days consecutive coding · **{total_contributions}** contributions this year"
     
-    return section
-
-
-def generate_languages_section(language_stats):
-    """Generate the languages table section."""
-    if not language_stats:
-        return "No language data available"
+    # Second line: languages inline
+    if language_stats:
+        lang_parts = [f"{lang} {pct:.1f}%" for lang, pct in language_stats.items()]
+        line2 = " · ".join(lang_parts)
+    else:
+        line2 = "No language data"
     
-    rows = ["| Language | Usage |", "|----------|-------|"]
-    
-    for lang, percentage in language_stats.items():
-        rows.append(f"| {lang} | {percentage:.1f}% |")
-    
-    return "\n".join(rows)
+    return f"{line1}\n\n{line2}"
 
 
-def update_readme(streak_section, languages_section):
+def update_readme(stats_section):
     """Update the README.md with new sections."""
     readme_path = "README.md"
     
     with open(readme_path, "r") as f:
         content = f.read()
     
-    # Update streak section
     content = re.sub(
-        r"<!--START_SECTION:streak-->.*?<!--END_SECTION:streak-->",
-        f"<!--START_SECTION:streak-->\n{streak_section}\n<!--END_SECTION:streak-->",
+        r"<!--START_SECTION:stats-->.*?<!--END_SECTION:stats-->",
+        f"<!--START_SECTION:stats-->\n{stats_section}\n<!--END_SECTION:stats-->",
         content,
         flags=re.DOTALL
     )
     
-    # Update languages section
-    content = re.sub(
-        r"<!--START_SECTION:languages-->.*?<!--END_SECTION:languages-->",
-        f"<!--START_SECTION:languages-->\n{languages_section}\n<!--END_SECTION:languages-->",
-        content,
-        flags=re.DOTALL
-    )
-    
-    # Update timestamp
     now = datetime.now().strftime("%B %d, %Y at %H:%M UTC")
     content = re.sub(
         r"<sub>Last updated:.*?</sub>",
@@ -225,12 +202,11 @@ def main():
     language_stats = get_language_stats(data)
     print(f"Languages found: {list(language_stats.keys())}")
     
-    print("Generating sections...")
-    streak_section = generate_streak_section(streak, total_contributions)
-    languages_section = generate_languages_section(language_stats)
+    print("Generating stats section...")
+    stats_section = generate_stats_section(streak, total_contributions, language_stats)
     
     print("Updating README...")
-    update_readme(streak_section, languages_section)
+    update_readme(stats_section)
     
     print("Done!")
 
