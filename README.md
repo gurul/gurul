@@ -9,16 +9,12 @@ I'm a Computer Science student at UW Seattle building technology that bridges co
 ## 🔥 Coding Streak
 
 <!--START_SECTION:streak-->
-**3** days consecutive coding 🔥
+**3** days consecutive coding 🔥 Keep it going!
 
-```
-[███░░░░░░░░░░░░░░░░░░░░░░░░░░░] Keep it going!
-```
-
-<sub>Total contributions this year: **120**</sub>
+Total contributions this year: **121**
 <!--END_SECTION:streak-->
 
-<sub>Last updated: December 25, 2025 at 10:22 UTC</sub>
+<sub>Last updated: December 25, 2025 at 10:25 UTC</sub>
 
 ---
 
@@ -27,14 +23,14 @@ I'm a Computer Science student at UW Seattle building technology that bridges co
 <!--START_SECTION:languages-->
 | Language | Usage |
 |----------|-------|
-| 🟡 **JavaScript** | `██████████████████░░` 91.4% |
-| 🔵 **TypeScript** | `█░░░░░░░░░░░░░░░░░░░` 5.3% |
-| 🟠 **Swift** | `░░░░░░░░░░░░░░░░░░░░` 1.5% |
-| ⬜ **Jupyter Notebook** | `░░░░░░░░░░░░░░░░░░░░` 0.8% |
-| 🟣 **CSS** | `░░░░░░░░░░░░░░░░░░░░` 0.3% |
-| ⬜ **Mermaid** | `░░░░░░░░░░░░░░░░░░░░` 0.3% |
-| 🟢 **Python** | `░░░░░░░░░░░░░░░░░░░░` 0.2% |
-| 🟠 **HTML** | `░░░░░░░░░░░░░░░░░░░░` 0.1% |
+| 🟡 JavaScript | 91.4% |
+| 🔵 TypeScript | 5.3% |
+| 🟠 Swift | 1.5% |
+| ⬜ Jupyter Notebook | 0.8% |
+| 🟣 CSS | 0.3% |
+| ⬜ Mermaid | 0.3% |
+| 🟢 Python | 0.2% |
+| 🟠 HTML | 0.1% |
 <!--END_SECTION:languages-->
 
 
@@ -42,11 +38,9 @@ I'm a Computer Science student at UW Seattle building technology that bridges co
 <summary>📊 More Stats</summary>
 
 <!--START_SECTION:stats-->
-```
-Commits this year: 120
-PRs opened: 0
-Issues opened: 0
-```
+- Commits this year: 121
+- PRs opened: 0
+- Issues opened: 0
 <!--END_SECTION:stats-->
 
 </details>
