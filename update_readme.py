@@ -51,12 +51,6 @@ def get_contribution_data():
                     }
                 }
             }
-            pullRequests(first: 1) {
-                totalCount
-            }
-            issues(first: 1) {
-                totalCount
-            }
         }
     }
     """
@@ -156,21 +150,6 @@ def get_language_stats(contribution_data):
         return {}
 
 
-def get_additional_stats(contribution_data):
-    """Get PR and issue counts."""
-    if not contribution_data:
-        return 0, 0, 0
-    
-    try:
-        user = contribution_data["data"]["user"]
-        total_contributions = user["contributionsCollection"]["contributionCalendar"]["totalContributions"]
-        prs = user["pullRequests"]["totalCount"]
-        issues = user["issues"]["totalCount"]
-        return total_contributions, prs, issues
-    except (KeyError, TypeError):
-        return 0, 0, 0
-
-
 def generate_streak_section(streak, total_contributions):
     """Generate the streak display section."""
     section = f"""**{streak}** days consecutive coding
@@ -191,13 +170,6 @@ def generate_languages_section(language_stats):
         rows.append(f"| {lang} | {percentage:.1f}% |")
     
     return "\n".join(rows)
-
-
-def generate_stats_section(total, prs, issues):
-    """Generate the additional stats section."""
-    return f"""- Commits this year: {total}
-- PRs opened: {prs}
-- Issues opened: {issues}"""
 
 
 def update_readme(streak_section, languages_section):
