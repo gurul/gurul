@@ -11,10 +11,10 @@ I'm a Computer Science student at UW Seattle building technology that preserves 
 <!--START_SECTION:streak-->
 **3** days consecutive coding
 
-Total contributions this year: **129**
+Total contributions this year: **130**
 <!--END_SECTION:streak-->
 
-<sub>Last updated: December 25, 2025 at 10:54 UTC</sub>
+<sub>Last updated: December 25, 2025 at 23:21 UTC</sub>
 
 ---
 
@@ -23,14 +23,14 @@ Total contributions this year: **129**
 <!--START_SECTION:languages-->
 | Language | Usage |
 |----------|-------|
-| JavaScript | 91.5% |
-| TypeScript | 5.3% |
-| Swift | 1.5% |
-| Jupyter Notebook | 0.8% |
-| CSS | 0.3% |
-| Mermaid | 0.3% |
+| JavaScript | 73.9% |
+| Jupyter Notebook | 22.0% |
+| TypeScript | 2.9% |
+| Swift | 0.8% |
+| CSS | 0.2% |
+| Mermaid | 0.2% |
 | Python | 0.1% |
-| HTML | 0.1% |
+| HTML | 0.0% |
 <!--END_SECTION:languages-->
 
 ---
