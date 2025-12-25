@@ -10,11 +10,6 @@ I'm a Computer Science student at UW Seattle building technology that bridges co
 
 <!--START_SECTION:streak-->
 **3** days consecutive coding 🔥
-
-```
-[███░░░░░░░░░░░░░░░░░░░░░░░░░░░] Keep it going!
-```
-
 <sub>Total contributions this year: **116**</sub>
 <!--END_SECTION:streak-->
 
