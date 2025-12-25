@@ -1,6 +1,6 @@
 # Hey, I'm Guru 👋
 
-I'm a Computer Science student at UW Seattle building technology that bridges communities. Currently obsessing over **storeybox** — a physical storytelling booth that captures authentic moments.
+I'm a Computer Science student at UW Seattle building technology that preserves human context at scale. Currently obsessing over **storeybox** — a physical storytelling booth that captures authentic moments.
 
 > *"In the depth of winter, I finally learned that within me there lay an invincible summer."*
 
@@ -32,18 +32,6 @@ Total contributions this year: **125**
 | Python | 0.1% |
 | HTML | 0.1% |
 <!--END_SECTION:languages-->
-
-
-<details>
-<summary>📊 More Stats</summary>
-
-<!--START_SECTION:stats-->
-- Commits this year: 123
-- PRs opened: 0
-- Issues opened: 0
-<!--END_SECTION:stats-->
-
-</details>
 
 ---
 
