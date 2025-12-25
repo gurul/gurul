@@ -188,10 +188,9 @@ def generate_streak_section(streak, total_contributions):
         message = "Week streak!"
     elif streak >= 1:
         fire = "🔥"
-        message = "Keep it going!"
+        message = "__̴ı̴̴̡̡̡ ̡͌l̡̡̡ ̡͌l̡*̡̡ ̴̡ı̴̴̡ ̡̡͡|̲̲̲͡͡͡ ̲▫̲͡ ̲̲̲͡͡π̲̲͡͡ ̲̲͡▫̲̲͡͡ ̲|̡̡̡ ̡ ̴̡ı̴̡̡ ̡͌l̡̡̡̡.___"
     else:
         fire = ""
-        message = "Start your streak today!"
     
     section = f"""**{streak}** days consecutive coding {fire} {message}
 
