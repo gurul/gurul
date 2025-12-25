@@ -176,7 +176,7 @@ def generate_streak_section(streak, total_contributions):
     # Streak fire emojis based on streak length
     if streak >= 100:
         fire = "🔥" * 5
-        message = "LEGENDARY STREAK!"
+        message = "Legendary!"
     elif streak >= 30:
         fire = "🔥" * 4
         message = "On fire!"
@@ -190,20 +190,12 @@ def generate_streak_section(streak, total_contributions):
         fire = "🔥"
         message = "Keep it going!"
     else:
-        fire = "💤"
+        fire = ""
         message = "Start your streak today!"
     
-    # Create a simple visual bar
-    bar_length = min(streak, 30)
-    bar = "█" * bar_length + "░" * (30 - bar_length)
-    
-    section = f"""**{streak}** days consecutive coding {fire}
+    section = f"""**{streak}** days consecutive coding {fire} {message}
 
-```
-[{bar}] {message}
-```
-
-<sub>Total contributions this year: **{total_contributions}**</sub>"""
+Total contributions this year: **{total_contributions}**"""
     
     return section
 
@@ -211,7 +203,7 @@ def generate_streak_section(streak, total_contributions):
 def generate_languages_section(language_stats):
     """Generate the languages table section."""
     if not language_stats:
-        return "| Language | Usage |\n|----------|-------|\n| No data available | - |"
+        return "No language data available"
     
     # Language colors (subset of common ones)
     colors = {
@@ -235,20 +227,16 @@ def generate_languages_section(language_stats):
     
     for lang, percentage in language_stats.items():
         icon = colors.get(lang, "⬜")
-        bar_filled = int(percentage / 5)  # 20 char max bar
-        bar = "█" * bar_filled + "░" * (20 - bar_filled)
-        rows.append(f"| {icon} **{lang}** | `{bar}` {percentage:.1f}% |")
+        rows.append(f"| {icon} {lang} | {percentage:.1f}% |")
     
     return "\n".join(rows)
 
 
 def generate_stats_section(total, prs, issues):
     """Generate the additional stats section."""
-    return f"""```
-Commits this year: {total}
-PRs opened: {prs}
-Issues opened: {issues}
-```"""
+    return f"""- Commits this year: {total}
+- PRs opened: {prs}
+- Issues opened: {issues}"""
 
 
 def update_readme(streak_section, languages_section, stats_section):
