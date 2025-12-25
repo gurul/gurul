@@ -9,12 +9,12 @@ I'm a Computer Science student at UW Seattle building technology that bridges co
 ## 🔥 Coding Streak
 
 <!--START_SECTION:streak-->
-**3** days consecutive coding 🔥 __̴ı̴̴̡̡̡ ̡͌l̡̡̡ ̡͌l̡*̡̡ ̴̡ı̴̴̡ ̡̡͡|̲̲̲͡͡͡ ̲▫̲͡ ̲̲̲͡͡π̲̲͡͡ ̲̲͡▫̲̲͡͡ ̲|̡̡̡ ̡ ̴̡ı̴̡̡ ̡͌l̡̡̡̡.___
+**3** days consecutive coding
 
-Total contributions this year: **122**
+Total contributions this year: **123**
 <!--END_SECTION:streak-->
 
-<sub>Last updated: December 25, 2025 at 10:28 UTC</sub>
+<sub>Last updated: December 25, 2025 at 10:31 UTC</sub>
 
 ---
 
@@ -23,7 +23,7 @@ Total contributions this year: **122**
 <!--START_SECTION:languages-->
 | Language | Usage |
 |----------|-------|
-| 🟡 JavaScript | 91.4% |
+| 🟡 JavaScript | 91.5% |
 | 🔵 TypeScript | 5.3% |
 | 🟠 Swift | 1.5% |
 | ⬜ Jupyter Notebook | 0.8% |
@@ -38,7 +38,7 @@ Total contributions this year: **122**
 <summary>📊 More Stats</summary>
 
 <!--START_SECTION:stats-->
-- Commits this year: 122
+- Commits this year: 123
 - PRs opened: 0
 - Issues opened: 0
 <!--END_SECTION:stats-->
