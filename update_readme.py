@@ -144,22 +144,29 @@ def get_language_stats(contribution_data):
         return {}
 
 
-def generate_stats_section(streak, total_contributions, language_stats):
-    """Generate compact stats section."""
-    # First line: streak and contributions
-    line1 = f"**{streak}** days consecutive coding · **{total_contributions}** contributions this year"
+def generate_streak_section(streak, total_contributions):
+    """Generate the streak display section."""
+    section = f"""**{streak}** days consecutive coding
+
+Total contributions this year: **{total_contributions}**"""
     
-    # Second line: languages inline
-    if language_stats:
-        lang_parts = [f"{lang} {pct:.1f}%" for lang, pct in language_stats.items()]
-        line2 = " · ".join(lang_parts)
-    else:
-        line2 = "No language data"
-    
-    return f"{line1}\n\n{line2}"
+    return section
 
 
-def update_readme(stats_section):
+def generate_languages_section(language_stats):
+    """Generate the languages table section."""
+    if not language_stats:
+        return "No language data available"
+    
+    rows = ["| Language | Usage |", "|----------|-------|"]
+    
+    for lang, percentage in language_stats.items():
+        rows.append(f"| {lang} | {percentage:.1f}% |")
+    
+    return "\n".join(rows)
+
+
+def update_readme(streak_section, languages_section):
     """Update the README.md with new sections."""
     readme_path = "README.md"
     
@@ -167,8 +174,15 @@ def update_readme(stats_section):
         content = f.read()
     
     content = re.sub(
-        r"<!--START_SECTION:stats-->.*?<!--END_SECTION:stats-->",
-        f"<!--START_SECTION:stats-->\n{stats_section}\n<!--END_SECTION:stats-->",
+        r"<!--START_SECTION:streak-->.*?<!--END_SECTION:streak-->",
+        f"<!--START_SECTION:streak-->\n{streak_section}\n<!--END_SECTION:streak-->",
+        content,
+        flags=re.DOTALL
+    )
+    
+    content = re.sub(
+        r"<!--START_SECTION:languages-->.*?<!--END_SECTION:languages-->",
+        f"<!--START_SECTION:languages-->\n{languages_section}\n<!--END_SECTION:languages-->",
         content,
         flags=re.DOTALL
     )
@@ -202,11 +216,12 @@ def main():
     language_stats = get_language_stats(data)
     print(f"Languages found: {list(language_stats.keys())}")
     
-    print("Generating stats section...")
-    stats_section = generate_stats_section(streak, total_contributions, language_stats)
+    print("Generating sections...")
+    streak_section = generate_streak_section(streak, total_contributions)
+    languages_section = generate_languages_section(language_stats)
     
     print("Updating README...")
-    update_readme(stats_section)
+    update_readme(streak_section, languages_section)
     
     print("Done!")
 
