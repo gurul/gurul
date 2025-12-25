@@ -11,10 +11,10 @@ I'm a Computer Science student at UW Seattle building technology that bridges co
 <!--START_SECTION:streak-->
 **3** days consecutive coding
 
-Total contributions this year: **123**
+Total contributions this year: **124**
 <!--END_SECTION:streak-->
 
-<sub>Last updated: December 25, 2025 at 10:31 UTC</sub>
+<sub>Last updated: December 25, 2025 at 10:38 UTC</sub>
 
 ---
 
@@ -23,14 +23,14 @@ Total contributions this year: **123**
 <!--START_SECTION:languages-->
 | Language | Usage |
 |----------|-------|
-| 🟡 JavaScript | 91.5% |
-| 🔵 TypeScript | 5.3% |
-| 🟠 Swift | 1.5% |
-| ⬜ Jupyter Notebook | 0.8% |
-| 🟣 CSS | 0.3% |
-| ⬜ Mermaid | 0.3% |
-| 🟢 Python | 0.2% |
-| 🟠 HTML | 0.1% |
+| JavaScript | 91.5% |
+| TypeScript | 5.3% |
+| Swift | 1.5% |
+| Jupyter Notebook | 0.8% |
+| CSS | 0.3% |
+| Mermaid | 0.3% |
+| Python | 0.2% |
+| HTML | 0.1% |
 <!--END_SECTION:languages-->
 
 
