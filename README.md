@@ -35,4 +35,4 @@ Total contributions this year: **126**
 
 ---
 
-*From Tenali, India → Seattle, WA.*
+*Born in Tenali, grounded in many worlds*
