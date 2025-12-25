@@ -173,26 +173,7 @@ def get_additional_stats(contribution_data):
 
 def generate_streak_section(streak, total_contributions):
     """Generate the streak display section."""
-    # Streak fire emojis based on streak length
-    if streak >= 100:
-        fire = "🔥" * 5
-        message = "Legendary!"
-    elif streak >= 30:
-        fire = "🔥" * 4
-        message = "On fire!"
-    elif streak >= 14:
-        fire = "🔥" * 3
-        message = "Two weeks strong!"
-    elif streak >= 7:
-        fire = "🔥" * 2
-        message = "Week streak!"
-    elif streak >= 1:
-        fire = "🔥"
-        message = "__̴ı̴̴̡̡̡ ̡͌l̡̡̡ ̡͌l̡*̡̡ ̴̡ı̴̴̡ ̡̡͡|̲̲̲͡͡͡ ̲▫̲͡ ̲̲̲͡͡π̲̲͡͡ ̲̲͡▫̲̲͡͡ ̲|̡̡̡ ̡ ̴̡ı̴̡̡ ̡͌l̡̡̡̡.___"
-    else:
-        fire = ""
-    
-    section = f"""**{streak}** days consecutive coding {fire} {message}
+    section = f"""**{streak}** days consecutive coding
 
 Total contributions this year: **{total_contributions}**"""
     
