@@ -78,32 +78,25 @@ def calculate_streak(contribution_data):
         calendar = contribution_data["data"]["user"]["contributionsCollection"]["contributionCalendar"]
         total_contributions = calendar["totalContributions"]
         
-        all_days = []
+        # Build a dict for O(1) lookup
+        contrib_by_date = {}
         for week in calendar["weeks"]:
             for day in week["contributionDays"]:
-                all_days.append({
-                    "date": datetime.strptime(day["date"], "%Y-%m-%d").date(),
-                    "count": day["contributionCount"]
-                })
+                date = datetime.strptime(day["date"], "%Y-%m-%d").date()
+                contrib_by_date[date] = day["contributionCount"]
         
-        all_days.sort(key=lambda x: x["date"], reverse=True)
-        
-        streak = 0
         today = datetime.now().date()
+        streak = 0
         
-        for i, day in enumerate(all_days):
-            expected_date = today - timedelta(days=i)
-            
-            if i == 0 and day["date"] == today and day["count"] == 0:
-                continue
-            
-            if day["date"] == expected_date or (i == 0 and day["date"] == today - timedelta(days=1)):
-                if day["count"] > 0:
-                    streak += 1
-                else:
-                    break
-            elif day["date"] < expected_date:
-                break
+        # Start from today, or yesterday if today has no contributions yet
+        current_date = today
+        if contrib_by_date.get(today, 0) == 0:
+            current_date = today - timedelta(days=1)
+        
+        # Count backwards while we have contributions
+        while current_date in contrib_by_date and contrib_by_date[current_date] > 0:
+            streak += 1
+            current_date -= timedelta(days=1)
         
         return streak, total_contributions
         
