@@ -1,8 +1,7 @@
 # Hey, I'm Guru 👋
 
-I'm a Computer Science student at UW Seattle building technology that preserves human context at scale. Currently obsessing over **storeybox** — a physical storytelling booth that captures authentic moments.
+I'm a Computer Science student at UW Seattle building technology that preserves human context at scale. 
 
-> *"In the depth of winter, I finally learned that within me there lay an invincible summer."*
 
 ---
 
