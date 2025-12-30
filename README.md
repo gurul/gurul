@@ -34,4 +34,3 @@ Total contributions this year: **133**
 
 ---
 
-*Born in Tenali, grounded in many worlds*
