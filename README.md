@@ -8,12 +8,12 @@ I'm a Computer Science student at UW Seattle building technology that preserves 
 ## 🔥 Coding Streak
 
 <!--START_SECTION:streak-->
-**2** days consecutive coding
+**0** days consecutive coding
 
 Total contributions this year: **134**
 <!--END_SECTION:streak-->
 
-<sub>Last updated: December 30, 2025 at 06:45 UTC</sub>
+<sub>Last updated: December 31, 2025 at 01:25 UTC</sub>
 
 ---
 
