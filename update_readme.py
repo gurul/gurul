@@ -147,16 +147,13 @@ Total contributions this year: **{total_contributions}**"""
 
 
 def generate_languages_section(language_stats):
-    """Generate the languages table section."""
+    """Generate the languages section as comma-separated list."""
     if not language_stats:
         return "No language data available"
     
-    rows = ["| Language | Usage |", "|----------|-------|"]
+    lang_parts = [f"{lang} ({percentage:.1f}%)" for lang, percentage in language_stats.items()]
     
-    for lang, percentage in language_stats.items():
-        rows.append(f"| {lang} | {percentage:.1f}% |")
-    
-    return "\n".join(rows)
+    return ", ".join(lang_parts)
 
 
 def update_readme(streak_section, languages_section):
