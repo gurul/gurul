@@ -8,19 +8,19 @@ I'm a Computer Science student at UW Seattle building technology that preserves 
 ## 🔥 Coding Streak
 
 <!--START_SECTION:streak-->
-**1** days consecutive coding
+**2** days consecutive coding
 
-Total contributions this year: **145**
+Total contributions this year: **146**
 <!--END_SECTION:streak-->
 
-<sub>Last updated: January 09, 2026 at 01:26 UTC</sub>
+<sub>Last updated: January 10, 2026 at 01:24 UTC</sub>
 
 ---
 
 ## 🛠️ Languages I Work With
 
 <!--START_SECTION:languages-->
-JavaScript (60.8%), Jupyter Notebook (35.8%), TypeScript (2.4%), Swift (0.7%), CSS (0.2%), Mermaid (0.1%), Python (0.1%), HTML (0.0%)
+JavaScript (60.7%), Jupyter Notebook (35.8%), TypeScript (2.4%), Swift (0.7%), CSS (0.2%), Python (0.2%), Mermaid (0.1%), HTML (0.0%)
 <!--END_SECTION:languages-->
 
 ---
