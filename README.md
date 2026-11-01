@@ -1,3 +1,3 @@
 <p align="center">
-  <img src="koi/koi.gif" width="256" alt="A red koi and a black koi with white scales, circling each other forever" />
+  <img src="koi/koi.gif" width="256" alt="A red koi and a black koi with white scales, swimming on their own and steering clear of each other" />
 </p>

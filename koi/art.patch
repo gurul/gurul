@@ -1,21 +1,376 @@
-diff --git a/examples/circling-pair.rs b/examples/circling-pair.rs
+diff --git a/examples/avoiding-pair.rs b/examples/avoiding-pair.rs
 new file mode 100644
-index 0000000..af0406c
+index 0000000..8477086
 --- /dev/null
-+++ b/examples/circling-pair.rs
-@@ -0,0 +1,74 @@
-+//! One red koi and one black koi, half a lap apart, circling each other forever.
-+//! Usage: circling-pair SNAPSHOT OUTPUT.gif CONTACT_DIR SIZE
++++ b/examples/avoiding-pair.rs
+@@ -0,0 +1,570 @@
++//! One red koi and one black koi swimming a small pond, each deciding its own turns.
++//!
++//! Every frame, each fish runs the same rule:
++//!   1. Head for the next point on my own route.
++//!   2. If the other fish is inside my personal space, turn away from it instead;
++//!      the closer it is, the more this wins. (Couzin et al. 2002, zone of repulsion.)
++//!   3. Turn no faster than a fish can.
++//!
++//! Neither fish knows the other's route. The routes are closed loops, so the whole
++//! system is driven with a period of one GIF loop and settles into an orbit that
++//! repeats exactly: the GIF is the simulation itself, with no cut or blend at the seam.
++//!
++//! Usage:
++//!   avoiding-pair search SIZE FIRST_SEED SEED_COUNT
++//!   avoiding-pair render SIZE SEED SNAPSHOT OUTPUT.gif CONTACT_DIR
++//!
++//! The published GIF is `render 1500 33961`, at upstream commit 7305e9b. From the
++//! snapshot only `account_id` reaches the art (it seeds the scales), so upstream's
++//! tests/fixtures/account-with-history.json with `account_id` set to 110717420 will do.
 +
++use std::f64::consts::{PI, TAU};
 +use std::{env, fs};
 +
 +use git_koi::behavior::Behavior;
 +use git_koi::coat::KoiBody;
 +use git_koi::history::AccountSnapshot;
 +use git_koi::koi::{KoiDevelopment, StreakDevelopment, derive_koi_development};
-+use git_koi::motion::frame_count;
++use git_koi::motion::{Course, calculate_swim_pose};
 +use git_koi::output::{encode_gif, encode_png};
-+use git_koi::render::{KoiFrame, render_swim_frame};
++use git_koi::render::{KoiFrame, calculate_body_length_pixels, render_posed_frame};
++
++/// Sixteen seconds at 15 frames a second: a whole number of cruise loops, so the tail
++/// beat, fins, and breathing close along with the swimming.
++const LOOP_FRAMES: usize = 240;
++const SETTLING_LOOPS: usize = 80;
++/// The route point a fish heads for, this many frames ahead of now.
++const LEAD_FRAMES: usize = 12;
++/// Inside this distance to any point of the other fish's body, a fish starts to turn away.
++const PERSONAL_SPACE_PIXELS: f64 = 78.0;
++/// By this distance, turning away has fully taken over.
++const TOO_CLOSE_PIXELS: f64 = 44.0;
++const AWAY_STRENGTH: f64 = 8.0;
++const TIGHTEST_TURN_RADIUS_PIXELS: f64 = 30.0;
++const STEERING_GAIN: f64 = 0.16;
++const TURN_SMOOTHING: f64 = 0.3;
++/// Heads stay this far from the frame center, on either axis.
++const POND_REACH_PIXELS: f64 = 92.0;
++/// The black fish's strokes run this many frames behind the red fish's.
++const BLACK_FRAME_OFFSET: u32 = 37;
++/// Must match the cruise style's fin flare on the inside of its clockwise lap.
++const CRUISE_INSIDE_FLARE_RADIANS: f64 = 0.12;
++
++type Point = [f64; 2];
++
++fn distance(from: Point, to: Point) -> f64 {
++    (to[0] - from[0]).hypot(to[1] - from[1])
++}
++
++/// Small, seedable, and dependency free.
++struct Random(u64);
++
++impl Random {
++    fn next(&mut self) -> f64 {
++        self.0 ^= self.0 << 13;
++        self.0 ^= self.0 >> 7;
++        self.0 ^= self.0 << 17;
++        (self.0 >> 11) as f64 / (1u64 << 53) as f64
++    }
++
++    fn between(&mut self, low: f64, high: f64) -> f64 {
++        low + (high - low) * self.next()
++    }
++}
++
++/// A closed route: a few circles added together, each a whole number of turns per loop.
++struct Route {
++    /// `(turns per loop, radius x, radius y, phase x, phase y)`.
++    waves: Vec<(f64, f64, f64, f64, f64)>,
++}
++
++impl Route {
++    fn invent(random: &mut Random) -> Self {
++        let turns = [1.0, 2.0, 3.0];
++        let radii = [54.0, 30.0, 12.0];
++        let waves = turns
++            .iter()
++            .zip(radii)
++            .map(|(&turn, radius)| {
++                (
++                    turn,
++                    radius * random.between(0.5, 1.2),
++                    radius * random.between(0.5, 1.2),
++                    random.between(0.0, TAU),
++                    random.between(0.0, TAU),
++                )
++            })
++            .collect();
++        Self { waves }
++    }
++
++    fn at(&self, frame: usize) -> Point {
++        let loop_fraction = TAU * frame as f64 / LOOP_FRAMES as f64;
++        let mut point = [0.0; 2];
++        for &(turn, radius_x, radius_y, phase_x, phase_y) in &self.waves {
++            point[0] += radius_x * (turn * loop_fraction + phase_x).cos();
++            point[1] += radius_y * (turn * loop_fraction + phase_y).sin();
++        }
++        point
++    }
++
++    fn length(&self) -> f64 {
++        (0..LOOP_FRAMES)
++            .map(|frame| distance(self.at(frame), self.at(frame + 1)))
++            .sum()
++    }
++
++    fn reach(&self) -> f64 {
++        (0..LOOP_FRAMES)
++            .map(|frame| {
++                let point = self.at(frame);
++                point[0].abs().max(point[1].abs())
++            })
++            .fold(0.0, f64::max)
++    }
++}
++
++/// Speed through one stroke of the cruise style: a beat, then a glide.
++fn stroke_speed(frame: u32) -> f64 {
++    const STROKE_FRAMES: f64 = 60.0;
++    const STROKE_SHARE: f64 = 0.55;
++    const LAG_FRAMES: f64 = 6.0;
++    let fraction = (f64::from(frame) - LAG_FRAMES).rem_euclid(STROKE_FRAMES) / STROKE_FRAMES;
++    let beat = if fraction < STROKE_SHARE {
++        (PI * fraction / STROKE_SHARE).sin()
++    } else {
++        0.0
++    };
++    (0.75 + 0.5 * beat) / 0.925
++}
++
++#[derive(Clone, Copy)]
++struct Fish {
++    head: Point,
++    heading: f64,
++    turning: f64,
++}
++
++/// The points of a fish's body, walking back along where its head has been.
++fn body_points(history: &[Point], body_length: f64) -> Vec<Point> {
++    let mut covered = 0.0;
++    let mut points = vec![*history.last().expect("a fish has a head")];
++    for pair in history.windows(2).rev() {
++        covered += distance(pair[0], pair[1]);
++        points.push(pair[0]);
++        if covered >= body_length {
++            break;
++        }
++    }
++    points
++}
++
++/// The rule: one step for one fish. Returns its new state and whether it dodged.
++fn step(
++    fish: Fish,
++    route: &Route,
++    route_speed: f64,
++    frame: usize,
++    stroke_frame: u32,
++    other_body: Option<&[Point]>,
++) -> (Fish, bool) {
++    // Rule 1: where I want to go, and how far behind schedule I am.
++    let lead = route.at(frame + LEAD_FRAMES);
++    let lead_distance = distance(fish.head, lead);
++    let mut desire = [
++        (lead[0] - fish.head[0]) / lead_distance.max(1e-9),
++        (lead[1] - fish.head[1]) / lead_distance.max(1e-9),
++    ];
++    let schedule = (lead_distance / (LEAD_FRAMES as f64 * route_speed)).clamp(0.7, 1.5);
++
++    // Rule 2: the other fish's nearest point, if it is too close, pushes me away.
++    let mut dodged = false;
++    if let Some(other_body) = other_body {
++        let nearest = other_body
++            .iter()
++            .copied()
++            .min_by(|&a, &b| distance(fish.head, a).total_cmp(&distance(fish.head, b)))
++            .expect("a body has points");
++        let gap = distance(fish.head, nearest).max(1e-9);
++        if gap < PERSONAL_SPACE_PIXELS {
++            let closeness = ((PERSONAL_SPACE_PIXELS - gap)
++                / (PERSONAL_SPACE_PIXELS - TOO_CLOSE_PIXELS))
++                .clamp(0.0, 1.0);
++            let push = AWAY_STRENGTH * closeness * closeness;
++            desire[0] += push * (fish.head[0] - nearest[0]) / gap;
++            desire[1] += push * (fish.head[1] - nearest[1]) / gap;
++            dodged = true;
++        }
++    }
++
++    // Rule 3: turn toward the desire, as fast as a fish can, and swim on.
++    let speed = stroke_speed(stroke_frame) * route_speed * schedule;
++    let tightest_turn = speed / TIGHTEST_TURN_RADIUS_PIXELS;
++    let wanted = desire[1].atan2(desire[0]);
++    let error = (wanted - fish.heading + PI).rem_euclid(TAU) - PI;
++    let turn = (STEERING_GAIN * error).clamp(-tightest_turn, tightest_turn);
++    let turning = fish.turning + TURN_SMOOTHING * (turn - fish.turning);
++    let heading = fish.heading + turning;
++    let mut head = [
++        fish.head[0] + speed * heading.cos(),
++        fish.head[1] + speed * heading.sin(),
++    ];
++    head[0] = head[0].clamp(-POND_REACH_PIXELS, POND_REACH_PIXELS);
++    head[1] = head[1].clamp(-POND_REACH_PIXELS, POND_REACH_PIXELS);
++    (
++        Fish {
++            head,
++            heading,
++            turning,
++        },
++        dodged,
++    )
++}
++
++/// One loop of a settled pond.
++struct Orbit {
++    /// Heads over one loop, for each fish.
++    heads: [Vec<Point>; 2],
++    turnings: [Vec<f64>; 2],
++    dodging: Vec<bool>,
++    /// How far the last loop ended from where it began.
++    closure_pixels: f64,
++}
++
++fn simulate(routes: &[Route; 2], body_length: f64, avoid: bool) -> Orbit {
++    let speeds = [
++        routes[0].length() / LOOP_FRAMES as f64,
++        routes[1].length() / LOOP_FRAMES as f64,
++    ];
++    let start = |route: &Route| {
++        let [x0, y0] = route.at(0);
++        let [x1, y1] = route.at(1);
++        Fish {
++            head: [x0, y0],
++            heading: (y1 - y0).atan2(x1 - x0),
++            turning: 0.0,
++        }
++    };
++    let mut fish = [start(&routes[0]), start(&routes[1])];
++    let mut history = [vec![fish[0].head], vec![fish[1].head]];
++    let mut turning_history = [vec![0.0], vec![0.0]];
++    let mut dodging = vec![false];
++    let total_frames = SETTLING_LOOPS * LOOP_FRAMES;
++    for frame in 0..total_frames {
++        let bodies = [
++            body_points(&history[0], body_length),
++            body_points(&history[1], body_length),
++        ];
++        let frame_in_loop = frame % LOOP_FRAMES;
++        let stroke_frames = [frame_in_loop as u32, frame_in_loop as u32 + BLACK_FRAME_OFFSET];
++        let (red, red_dodged) = step(
++            fish[0],
++            &routes[0],
++            speeds[0],
++            frame_in_loop,
++            stroke_frames[0],
++            avoid.then_some(&bodies[1][..]),
++        );
++        let (black, black_dodged) = step(
++            fish[1],
++            &routes[1],
++            speeds[1],
++            frame_in_loop,
++            stroke_frames[1],
++            avoid.then_some(&bodies[0][..]),
++        );
++        fish = [red, black];
++        for index in 0..2 {
++            history[index].push(fish[index].head);
++            turning_history[index].push(fish[index].turning);
++        }
++        dodging.push(red_dodged || black_dodged);
++    }
++    let closure_pixels = (0..2)
++        .map(|index| {
++            distance(
++                history[index][total_frames],
++                history[index][total_frames - LOOP_FRAMES],
++            )
++        })
++        .fold(0.0, f64::max);
++    let tail = |values: &Vec<Point>| values[total_frames - LOOP_FRAMES..total_frames].to_vec();
++    let turn_tail = |values: &Vec<f64>| values[total_frames - LOOP_FRAMES..total_frames].to_vec();
++    Orbit {
++        heads: [tail(&history[0]), tail(&history[1])],
++        turnings: [turn_tail(&turning_history[0]), turn_tail(&turning_history[1])],
++        dodging: dodging[total_frames - LOOP_FRAMES..total_frames].to_vec(),
++        closure_pixels,
++    }
++}
++
++/// The body's center line in a frame, one pixel of arc between points, head first. It
++/// walks back through the loop, wrapping, and is lightly smoothed.
++fn center_line(heads: &[Point], frame: usize, point_count: usize) -> Vec<Point> {
++    const SMOOTHING_REACH: usize = 3;
++    let padded = point_count + 2 * SMOOTHING_REACH + 1;
++    let mut points = Vec::with_capacity(padded);
++    let mut newer = heads[frame];
++    let mut walked_frames = 1;
++    let mut older = heads[(frame + LOOP_FRAMES - walked_frames) % LOOP_FRAMES];
++    let mut remaining = 0.0;
++    points.push(newer);
++    while points.len() < padded {
++        let segment = distance(newer, older).max(1e-9);
++        remaining += 1.0;
++        if remaining <= segment {
++            let fraction = remaining / segment;
++            points.push([
++                newer[0] + (older[0] - newer[0]) * fraction,
++                newer[1] + (older[1] - newer[1]) * fraction,
++            ]);
++        } else {
++            remaining -= 1.0 + segment;
++            newer = older;
++            walked_frames += 1;
++            older = heads[(frame + LOOP_FRAMES * 4 - walked_frames) % LOOP_FRAMES];
++        }
++    }
++    (0..point_count)
++        .map(|index| {
++            let reach = index.min(SMOOTHING_REACH);
++            let window = &points[index - reach..=index + reach];
++            let sum = window
++                .iter()
++                .fold([0.0, 0.0], |sum, point| [sum[0] + point[0], sum[1] + point[1]]);
++            [sum[0] / window.len() as f64, sum[1] / window.len() as f64]
++        })
++        .collect()
++}
++
++/// How close the two center lines get across the loop.
++fn closest_bodies(orbit: &Orbit, point_count: usize) -> f64 {
++    let mut closest = f64::INFINITY;
++    for frame in 0..LOOP_FRAMES {
++        let red = center_line(&orbit.heads[0], frame, point_count);
++        let black = center_line(&orbit.heads[1], frame, point_count);
++        for red_point in red.iter().step_by(4) {
++            for black_point in black.iter().step_by(4) {
++                closest = closest.min(distance(*red_point, *black_point));
++            }
++        }
++    }
++    closest
++}
++
++fn count_dodges(dodging: &[bool]) -> usize {
++    (0..dodging.len())
++        .filter(|&frame| dodging[frame] && !dodging[(frame + dodging.len() - 1) % dodging.len()])
++        .count()
++}
++
++fn invent_routes(seed: u64) -> [Route; 2] {
++    let mut random = Random(0x9E37_79B9_7F4A_7C15 ^ seed.wrapping_mul(0xD134_2543_DE82_EF95));
++    for _ in 0..8 {
++        random.next();
++    }
++    [Route::invent(&mut random), Route::invent(&mut random)]
++}
 +
 +fn plain_development(snapshot: &AccountSnapshot, size: u64) -> KoiDevelopment {
 +    let mut development = derive_koi_development(snapshot).expect("valid snapshot");
@@ -31,51 +386,192 @@ index 0000000..af0406c
 +    development
 +}
 +
-+fn main() {
-+    let arguments: Vec<String> = env::args().skip(1).collect();
++fn render_fish(
++    development: &KoiDevelopment,
++    body: KoiBody,
++    orbit: &Orbit,
++    index: usize,
++    frame: usize,
++    point_count: usize,
++) -> KoiFrame {
++    let offset = if index == 0 { 0 } else { BLACK_FRAME_OFFSET };
++    let mut pose = calculate_swim_pose(Behavior::Cruise, frame as u32 + offset);
++    let line: &'static [Point] =
++        Box::leak(center_line(&orbit.heads[index], frame, point_count).into_boxed_slice());
++    pose.course = Course::Trail { center_line: line };
++    // The cruise flares the right fin, for its clockwise lap; flare whichever fin is
++    // inside this turn instead.
++    let turn_share = (orbit.turnings[index][frame] * TIGHTEST_TURN_RADIUS_PIXELS / 2.4).clamp(-1.0, 1.0);
++    let flare_shift = CRUISE_INSIDE_FLARE_RADIANS * (1.0 - turn_share);
++    pose.side_fin_openings_radians[0] += flare_shift;
++    pose.side_fin_openings_radians[1] -= flare_shift;
++    render_posed_frame(development, body, &pose)
++}
++
++/// Closest pixels of two silhouettes in a frame, or zero if they touch.
++fn pixel_gap(red: &KoiFrame, black: &KoiFrame) -> f64 {
++    let edge = |frame: &KoiFrame| -> Vec<(i32, i32)> {
++        let alpha: Vec<bool> = frame.as_rgba_bytes().chunks(4).map(|px| px[3] != 0).collect();
++        let at = |x: i32, y: i32| {
++            (0..256).contains(&x) && (0..256).contains(&y) && alpha[(y * 256 + x) as usize]
++        };
++        let mut pixels = Vec::new();
++        for y in 0..256 {
++            for x in 0..256 {
++                if at(x, y) && !(at(x - 1, y) && at(x + 1, y) && at(x, y - 1) && at(x, y + 1)) {
++                    pixels.push((x, y));
++                }
++            }
++        }
++        pixels
++    };
++    let red_edge = edge(red);
++    let black_edge = edge(black);
++    let mut closest = f64::INFINITY;
++    for &(x0, y0) in &red_edge {
++        for &(x1, y1) in &black_edge {
++            closest = closest.min(f64::from(x1 - x0).hypot(f64::from(y1 - y0)));
++        }
++    }
++    let touching = red
++        .as_rgba_bytes()
++        .chunks(4)
++        .zip(black.as_rgba_bytes().chunks(4))
++        .any(|(a, b)| a[3] != 0 && b[3] != 0);
++    if touching { 0.0 } else { closest }
++}
++
++fn search(size: u64, first_seed: u64, seed_count: u64) {
++    let body_length = calculate_body_length_pixels(size);
++    let point_count = body_length.round() as usize;
++    for seed in first_seed..first_seed + seed_count {
++        let routes = invent_routes(seed);
++        let lengths = [routes[0].length(), routes[1].length()];
++        let reach = routes[0].reach().max(routes[1].reach());
++        if !lengths.iter().all(|length| (440.0..680.0).contains(length)) || reach > 88.0 {
++            continue;
++        }
++        let orbit = simulate(&routes, body_length, true);
++        if orbit.closure_pixels > 0.01 {
++            continue;
++        }
++        let closest = closest_bodies(&orbit, point_count);
++        let dodges = count_dodges(&orbit.dodging);
++        let share = orbit.dodging.iter().filter(|&&dodge| dodge).count() as f64 / LOOP_FRAMES as f64;
++        if closest < 42.0 || dodges < 2 {
++            continue;
++        }
++        let free = simulate(&routes, body_length, false);
++        let free_closest = closest_bodies(&free, point_count);
++        println!(
++            "seed {seed} closest {closest:.1} without-rule {free_closest:.1} dodges {dodges} dodging {:.0}% closure {:.5} routes {:.0}/{:.0}",
++            share * 100.0,
++            orbit.closure_pixels,
++            lengths[0],
++            lengths[1]
++        );
++    }
++}
++
++fn render(size: u64, seed: u64, snapshot_path: &str, output: &str, contact_dir: &str) {
 +    let snapshot: AccountSnapshot =
-+        serde_json::from_str(&fs::read_to_string(&arguments[0]).unwrap()).unwrap();
-+    let size: u64 = arguments[3].parse().unwrap();
++        serde_json::from_str(&fs::read_to_string(snapshot_path).unwrap()).unwrap();
 +    let development = plain_development(&snapshot, size);
-+    let behavior = Behavior::Cruise;
-+    let loop_frames = frame_count(behavior);
-+    let half_lap = loop_frames / 2;
-+    let mut overlapping_frames = 0;
++    let body_length = calculate_body_length_pixels(size);
++    let point_count = body_length.round() as usize;
++    let routes = invent_routes(seed);
++    let orbit = simulate(&routes, body_length, true);
++    let free = simulate(&routes, body_length, false);
++    println!(
++        "body {body_length:.1}px, closure {:.6}px, dodges {}",
++        orbit.closure_pixels,
++        count_dodges(&orbit.dodging)
++    );
++
 +    let mut frames = Vec::new();
-+    for frame_index in 0..loop_frames {
-+        let black = render_swim_frame(&development, KoiBody::Black, behavior, frame_index);
-+        let red = render_swim_frame(&development, KoiBody::Red, behavior, frame_index + half_lap);
-+        let mut overlap = 0;
++    let mut smallest_gap = f64::INFINITY;
++    let mut smallest_gap_frame = 0;
++    let mut overlapping_frames = 0;
++    for frame in 0..LOOP_FRAMES {
++        let red = render_fish(&development, KoiBody::Red, &orbit, 0, frame, point_count);
++        let black = render_fish(&development, KoiBody::Black, &orbit, 1, frame, point_count);
++        let gap = pixel_gap(&red, &black);
++        if gap == 0.0 {
++            overlapping_frames += 1;
++        }
++        if gap < smallest_gap {
++            smallest_gap = gap;
++            smallest_gap_frame = frame;
++        }
 +        let pixels: Vec<[u8; 4]> = black
 +            .as_rgba_bytes()
 +            .as_chunks::<4>()
 +            .0
 +            .iter()
 +            .zip(red.as_rgba_bytes().as_chunks::<4>().0)
-+            .map(|(&under, &over)| {
-+                if under[3] != 0 && over[3] != 0 {
-+                    overlap += 1;
-+                }
-+                if over[3] != 0 { over } else { under }
-+            })
++            .map(|(&under, &over)| if over[3] != 0 { over } else { under })
 +            .collect();
-+        if overlap > 0 {
-+            overlapping_frames += 1;
-+        }
 +        frames.push(KoiFrame::from_rgba_pixels(pixels));
 +    }
-+    println!("frames {loop_frames}, overlapping frames {overlapping_frames}");
-+    fs::write(&arguments[1], encode_gif(&frames).unwrap()).unwrap();
-+    {
-+        let contact_dir = &arguments[2];
-+        fs::create_dir_all(contact_dir).unwrap();
-+        for frame_index in [0usize, 20, 40, 60, 80, 100] {
-+            fs::write(
-+                format!("{contact_dir}/frame-{frame_index:03}.png"),
-+                encode_png(&frames[frame_index]).unwrap(),
-+            )
-+            .unwrap();
-+        }
++    let mut edge_frames = 0;
++    for frame in &frames {
++        let touches_edge = frame.as_rgba_bytes().chunks(4).enumerate().any(|(index, pixel)| {
++            let (x, y) = (index % 256, index / 256);
++            pixel[3] != 0 && (x == 0 || y == 0 || x == 255 || y == 255)
++        });
++        edge_frames += usize::from(touches_edge);
++    }
++    let mut free_overlapping = 0;
++    for frame in 0..LOOP_FRAMES {
++        let red = render_fish(&development, KoiBody::Red, &free, 0, frame, point_count);
++        let black = render_fish(&development, KoiBody::Black, &free, 1, frame, point_count);
++        let touching = red
++            .as_rgba_bytes()
++            .chunks(4)
++            .zip(black.as_rgba_bytes().chunks(4))
++            .any(|(a, b)| a[3] != 0 && b[3] != 0);
++        free_overlapping += usize::from(touching);
++    }
++    println!(
++        "with rule: {overlapping_frames} touching frames of {LOOP_FRAMES}, smallest gap {smallest_gap:.1}px at frame {smallest_gap_frame}, {edge_frames} frames at the canvas edge"
++    );
++    println!("without rule: {free_overlapping} touching frames of {LOOP_FRAMES}");
++    fs::write(output, encode_gif(&frames).unwrap()).unwrap();
++    fs::create_dir_all(contact_dir).unwrap();
++    for frame_index in (0..LOOP_FRAMES).step_by(4) {
++        fs::write(
++            format!("{contact_dir}/frame-{frame_index:03}.png"),
++            encode_png(&frames[frame_index]).unwrap(),
++        )
++        .unwrap();
++    }
++    fs::write(
++        format!("{contact_dir}/dodging.txt"),
++        orbit
++            .dodging
++            .iter()
++            .map(|&dodge| if dodge { '#' } else { '.' })
++            .collect::<String>(),
++    )
++    .unwrap();
++}
++
++fn main() {
++    let arguments: Vec<String> = env::args().skip(1).collect();
++    match arguments[0].as_str() {
++        "search" => search(
++            arguments[1].parse().unwrap(),
++            arguments[2].parse().unwrap(),
++            arguments[3].parse().unwrap(),
++        ),
++        "render" => render(
++            arguments[1].parse().unwrap(),
++            arguments[2].parse().unwrap(),
++            &arguments[3],
++            &arguments[4],
++            &arguments[5],
++        ),
++        _ => panic!("search or render"),
 +    }
 +}
 diff --git a/src/coat.rs b/src/coat.rs
@@ -235,8 +731,25 @@ index c4319e4..b348812 100644
      /// The current streak fills a dithered share of the fin rims and tips with the
      /// body's streak color. Elsewhere, a fin-root tint is a language color, unless it
      /// matches the plain fins and so never shows.
+diff --git a/src/motion.rs b/src/motion.rs
+index 1fe4b33..069ed70 100644
+--- a/src/motion.rs
++++ b/src/motion.rs
+@@ -135,6 +135,12 @@ pub enum Course {
+         /// How far the koi is moved from the hover center, in native pixels.
+         drift_pixels: [f64; 2],
+     },
++    /// Along a line the caller chose, around the frame center: head first, with one
++    /// pixel of arc between points, so a swimmer can go anywhere.
++    Trail {
++        /// The body's center line, at least as many points as the body is long.
++        center_line: &'static [[f64; 2]],
++    },
+ }
+ 
+ /// How the koi's body and fins look in one frame. Paired values list the left fin,
 diff --git a/src/render.rs b/src/render.rs
-index 31f22e4..3651ff2 100644
+index 31f22e4..450acfe 100644
 --- a/src/render.rs
 +++ b/src/render.rs
 @@ -44,9 +44,8 @@ impl KoiFrame {
@@ -251,3 +764,83 @@ index 31f22e4..3651ff2 100644
          Self { rgba_pixels }
      }
  }
+@@ -85,7 +84,7 @@ pub fn render_swim_frame(
+     let koi_anatomy = calculate_anatomy(koi_development.total_contributions);
+     let swim_pose = calculate_swim_pose(behavior, frame_index);
+     let pose_center = match swim_pose.course {
+-        Course::Lap { .. } => [0.0, 0.0],
++        Course::Lap { .. } | Course::Trail { .. } => [0.0, 0.0],
+         Course::Hover { drift_pixels, .. } => {
+             let hover_fit = fit_hover_loop(behavior, &koi_anatomy);
+             [0, 1].map(|axis_index| {
+@@ -103,6 +102,26 @@ pub fn render_swim_frame(
+     )
+ }
+ 
++/// Render a koi in a pose the caller built, around the frame center.
++pub fn render_posed_frame(
++    koi_development: &KoiDevelopment,
++    koi_body: KoiBody,
++    swim_pose: &SwimPose,
++) -> KoiFrame {
++    render_pose(
++        koi_development,
++        koi_body,
++        &calculate_anatomy(koi_development.total_contributions),
++        swim_pose,
++        Framing::At([0.0, 0.0]),
++    )
++}
++
++/// How long a koi's body is at a contribution total, in native pixels.
++pub fn calculate_body_length_pixels(total_contributions: u64) -> f64 {
++    calculate_anatomy(total_contributions).body_length_pixels
++}
++
+ /// Where the view is centered: on the koi itself for the still image, or at a point
+ /// fixed for the whole loop.
+ enum Framing {
+@@ -140,7 +159,7 @@ fn fit_hover_loop(behavior: Behavior, koi_anatomy: &KoiAnatomy) -> HoverFit {
+             }
+             let drift_pixels = match swim_pose.course {
+                 Course::Hover { drift_pixels, .. } => drift_pixels,
+-                Course::Lap { .. } => [0.0; 2],
++                Course::Lap { .. } | Course::Trail { .. } => [0.0; 2],
+             };
+             ([min_corner, max_corner], drift_pixels)
+         })
+@@ -780,6 +799,12 @@ fn build_spine(koi_anatomy: &KoiAnatomy, swim_pose: &SwimPose) -> Vec<CurvePoint
+                 })
+                 .collect()
+         }
++        Course::Trail { center_line } => (0..point_count)
++            .map(|point_index| CurvePoint {
++                position: center_line[point_index],
++                half_width_pixels: calculate_point_half_width(point_index),
++            })
++            .collect(),
+     };
+     let mut body_spine = Vec::with_capacity(point_count);
+     for (point_index, center_point) in center_points.iter().enumerate() {
+diff --git a/tests/motion.rs b/tests/motion.rs
+index 93f0305..df99a13 100644
+--- a/tests/motion.rs
++++ b/tests/motion.rs
+@@ -434,7 +434,7 @@ fn collect_loop(behavior: Behavior) -> Vec<SwimPose> {
+ fn read_lap_angle(pose: &SwimPose) -> f64 {
+     match pose.course {
+         Course::Lap { angle_radians } => angle_radians,
+-        Course::Hover { .. } => 0.0,
++        Course::Hover { .. } | Course::Trail { .. } => 0.0,
+     }
+ }
+ 
+@@ -445,7 +445,7 @@ fn read_hover(pose: &SwimPose) -> (f64, [f64; 2]) {
+             heading_offset_radians,
+             drift_pixels,
+         } => (heading_offset_radians, drift_pixels),
+-        Course::Lap { .. } => (0.0, [0.0; 2]),
++        Course::Lap { .. } | Course::Trail { .. } => (0.0, [0.0; 2]),
+     }
+ }
+ 
