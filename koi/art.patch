@@ -1,9 +1,9 @@
 diff --git a/examples/avoiding-pair.rs b/examples/avoiding-pair.rs
 new file mode 100644
-index 0000000..3d2cfa7
+index 0000000..0a4eede
 --- /dev/null
 +++ b/examples/avoiding-pair.rs
-@@ -0,0 +1,789 @@
+@@ -0,0 +1,1006 @@
 +//! One red koi and one black koi swimming a small pond, each deciding its own turns.
 +//!
 +//! Every frame, each fish runs the same rule:
@@ -572,6 +572,208 @@ index 0000000..3d2cfa7
 +    }
 +}
 +
++/// What sits on the water, above the fish: pads and blooms they pass under, and rocks
++/// on the shore. Shadows go on the water itself, below the fish.
++struct Decor {
++    pixels: Vec<[u8; 4]>,
++    is_rock: Vec<bool>,
++}
++
++fn pixel_index(x: i32, y: i32) -> Option<usize> {
++    ((0..WIDTH).contains(&x) && (0..HEIGHT).contains(&y)).then(|| (y * WIDTH + x) as usize)
++}
++
++impl Decor {
++    fn put(&mut self, x: i32, y: i32, color: [u8; 4]) {
++        if let Some(index) = pixel_index(x, y) {
++            self.pixels[index] = color;
++        }
++    }
++
++    /// Darken the water beneath a shape, shifted down and right.
++    fn cast_shadow(water: &mut Water, x: i32, y: i32) {
++        if let Some(index) = pixel_index(x + 3, y + 4) {
++            let [red, green, blue, alpha] = water.pixels[index];
++            if alpha != 0 && (x + y) % 2 == 0 {
++                water.pixels[index] = [red / 4 * 3, green / 4 * 3, blue / 4 * 3, 255];
++            }
++        }
++    }
++
++    /// A round leaf with its notch, radial veins, and light from the upper left.
++    fn paint_pad(&mut self, water: &mut Water, center: [i32; 2], radius: f64, notch: f64) {
++        const RAMP: [[u8; 4]; 4] = [
++            [36, 100, 66, 255],
++            [50, 124, 74, 255],
++            [70, 146, 82, 255],
++            [98, 168, 90, 255],
++        ];
++        const RIM: [u8; 4] = [20, 62, 50, 255];
++        const VEIN: [u8; 4] = [124, 186, 104, 255];
++        let reach = radius.ceil() as i32 + 2;
++        for y in center[1] - reach..=center[1] + reach {
++            for x in center[0] - reach..=center[0] + reach {
++                let (dx, dy) = (f64::from(x - center[0]), f64::from(y - center[1]));
++                let angle = dy.atan2(dx);
++                let distance = dx.hypot(dy);
++                let edge = radius * (1.0 + 0.05 * (3.0 * angle + notch).sin());
++                let from_notch = ((angle - notch + PI).rem_euclid(TAU) - PI).abs();
++                if distance >= edge || from_notch < 0.2 {
++                    continue;
++                }
++                Self::cast_shadow(water, x, y);
++                let color = if distance > edge - 1.2 || from_notch < 0.3 {
++                    RIM
++                } else if (angle * 4.5 + notch).sin().abs() < 0.07 && distance > 2.0 {
++                    VEIN
++                } else {
++                    let light = 0.5 - 0.5 * (dx + dy) / radius;
++                    RAMP[(light * 3.0 + dither(x, y)).floor().clamp(0.0, 3.0) as usize]
++                };
++                self.put(x, y, color);
++            }
++        }
++    }
++
++    /// An open lotus from above: rings of pointed petals around a gold heart.
++    fn paint_lotus(&mut self, water: &mut Water, center: [i32; 2], radius: f64, turn: f64) {
++        const RINGS: [(usize, f64, f64, f64); 3] =
++            [(8, 1.0, 0.36, 0.0), (8, 0.76, 0.3, 0.39), (5, 0.52, 0.24, 0.2)];
++        const PINKS: [[[u8; 4]; 2]; 3] = [
++            [[248, 190, 212, 255], [255, 232, 240, 255]],
++            [[238, 142, 182, 255], [250, 196, 216, 255]],
++            [[220, 92, 148, 255], [240, 148, 186, 255]],
++        ];
++        const RIM: [u8; 4] = [158, 48, 104, 255];
++        const HEART: [u8; 4] = [246, 200, 76, 255];
++        const SEED: [u8; 4] = [196, 134, 40, 255];
++        let reach = radius.ceil() as i32 + 1;
++        for (ring, &(count, length, width, offset)) in RINGS.iter().enumerate() {
++            for petal in 0..count {
++                let angle = turn + offset + TAU * petal as f64 / count as f64;
++                let (cos, sin) = (angle.cos(), angle.sin());
++                let petal_length = radius * length;
++                for y in center[1] - reach..=center[1] + reach {
++                    for x in center[0] - reach..=center[0] + reach {
++                        let (dx, dy) = (f64::from(x - center[0]), f64::from(y - center[1]));
++                        let along = dx * cos + dy * sin;
++                        let across = -dx * sin + dy * cos;
++                        if along <= 0.0 || along >= petal_length {
++                            continue;
++                        }
++                        let half = radius * width * (PI * along / petal_length).sin().powf(0.8);
++                        if across.abs() >= half {
++                            continue;
++                        }
++                        if ring == 0 {
++                            Self::cast_shadow(water, x, y);
++                        }
++                        let tip = along / petal_length;
++                        let color = if across.abs() > half - 0.9 {
++                            RIM
++                        } else {
++                            PINKS[ring][usize::from(tip * 1.3 + dither(x, y) * 0.7 > 1.0)]
++                        };
++                        self.put(x, y, color);
++                    }
++                }
++            }
++        }
++        let heart = (radius * 0.2).max(1.5);
++        let heart_reach = heart.ceil() as i32;
++        for y in -heart_reach..=heart_reach {
++            for x in -heart_reach..=heart_reach {
++                if f64::from(x).hypot(f64::from(y)) < heart {
++                    let color = if (x + y) % 2 == 0 { HEART } else { SEED };
++                    self.put(center[0] + x, center[1] + y, color);
++                }
++            }
++        }
++    }
++
++    /// A shore stone with a lit top and moss settled on it.
++    fn paint_rock(&mut self, water: &mut Water, center: [i32; 2], size: [f64; 2], seed: f64) {
++        const RAMP: [[u8; 4]; 4] = [
++            [66, 68, 74, 255],
++            [92, 94, 98, 255],
++            [120, 121, 122, 255],
++            [150, 149, 144, 255],
++        ];
++        const MOSS: [[u8; 4]; 2] = [[70, 104, 62, 255], [98, 134, 72, 255]];
++        const RIM: [u8; 4] = [34, 36, 44, 255];
++        let reach_x = size[0].ceil() as i32 + 2;
++        let reach_y = size[1].ceil() as i32 + 2;
++        for y in center[1] - reach_y..=center[1] + reach_y {
++            for x in center[0] - reach_x..=center[0] + reach_x {
++                let (u, v) = (
++                    f64::from(x - center[0]) / size[0],
++                    f64::from(y - center[1]) / size[1],
++                );
++                let angle = v.atan2(u);
++                let edge = 1.0 + 0.08 * (2.0 * angle + seed).sin() + 0.05 * (5.0 * angle + seed).sin();
++                let distance = u.hypot(v);
++                if distance >= edge {
++                    continue;
++                }
++                Self::cast_shadow(water, x, y);
++                self.mark_rock(x, y);
++                let light = 0.5 - 0.6 * u - 0.7 * v;
++                let moss_patch = (0.5 * f64::from(x) + seed).sin() + (0.6 * f64::from(y)).sin();
++                let color = if distance > edge - 1.5 / size[1] {
++                    RIM
++                } else if light > 0.55 && moss_patch > 0.1 {
++                    MOSS[usize::from(dither(x, y) > 0.5)]
++                } else {
++                    RAMP[(light * 3.0 + dither(x, y)).floor().clamp(0.0, 3.0) as usize]
++                };
++                self.put(x, y, color);
++            }
++        }
++    }
++
++    fn mark_rock(&mut self, x: i32, y: i32) {
++        if let Some(index) = pixel_index(x, y) {
++            self.is_rock[index] = true;
++        }
++    }
++}
++
++/// Placed by hand in the water the fish use least: three small plantings and two groups
++/// of stones, with open water left between them.
++fn paint_decor(water: &mut Water) -> Decor {
++    let area = (WIDTH * HEIGHT) as usize;
++    let mut decor = Decor {
++        pixels: vec![[0; 4]; area],
++        is_rock: vec![false; area],
++    };
++    for (center, radius, notch) in [
++        ([258, 40], 17.0, 0.7),
++        ([297, 33], 13.0, 2.6),
++        ([319, 50], 9.0, -2.2),
++        ([452, 258], 16.0, -0.6),
++        ([493, 266], 13.0, 1.9),
++        ([517, 249], 9.0, 2.9),
++        ([196, 263], 12.0, 2.2),
++        ([219, 271], 8.0, 0.4),
++    ] {
++        decor.paint_pad(water, center, radius, notch);
++    }
++    decor.paint_lotus(water, [277, 49], 15.0, 0.2);
++    decor.paint_lotus(water, [474, 250], 16.0, 0.5);
++    decor.paint_lotus(water, [206, 257], 9.0, 0.1);
++    for (center, size, seed) in [
++        ([74, 31], [14.0, 10.0], 2.0),
++        ([42, 37], [20.0, 15.0], 0.5),
++        ([27, 71], [10.0, 8.0], 4.0),
++        ([791, 238], [10.0, 8.0], 1.2),
++        ([733, 274], [15.0, 10.0], 3.1),
++        ([764, 262], [24.0, 17.0], 5.2),
++    ] {
++        decor.paint_rock(water, center, size, seed);
++    }
++    decor
++}
++
 +/// A looping GIF that stores the pond once: every later frame holds only the pixels
 +/// that changed, over a canvas that is kept. Nothing can be made clear again that way,
 +/// so this panics if a frame tries; fish and glints must stay on solid water.
@@ -704,8 +906,10 @@ index 0000000..3d2cfa7
 +        coverage(&orbit) * 100.0
 +    );
 +
-+    let water = paint_water();
++    let mut water = paint_water();
 +    let glints = scatter_glints(&water);
++    let decor = paint_decor(&mut water);
++    let (mut under_plants, mut under_rocks) = (0, 0);
 +    let mut fish_off_water = 0;
 +    let mut frames = Vec::new();
 +    let mut smallest_gap = f64::INFINITY;
@@ -736,6 +940,18 @@ index 0000000..3d2cfa7
 +            if fish_pixel[3] != 0 {
 +                pixels[index] = *fish_pixel;
 +                fish_off_water += usize::from(!water.solid[index]);
++                if decor.pixels[index][3] != 0 {
++                    if decor.is_rock[index] {
++                        under_rocks += 1;
++                    } else {
++                        under_plants += 1;
++                    }
++                }
++            }
++        }
++        for (pixel, decor_pixel) in pixels.iter_mut().zip(&decor.pixels) {
++            if decor_pixel[3] != 0 {
++                *pixel = *decor_pixel;
 +            }
 +        }
 +        frames.push(KoiFrame::from_rgba_pixels(pixels));
@@ -755,6 +971,7 @@ index 0000000..3d2cfa7
 +        "with rule: {overlapping_frames} touching frames of {LOOP_FRAMES}, smallest gap {smallest_gap:.1}px at frame {smallest_gap_frame}, {fish_off_water} fish pixels off solid water"
 +    );
 +    println!("without rule: {free_overlapping} touching frames of {LOOP_FRAMES}");
++    println!("fish pixels under rocks {under_rocks}, under plants {under_plants}");
 +    fs::write(output, encode_layered_gif(&frames)).unwrap();
 +    fs::create_dir_all(contact_dir).unwrap();
 +    for frame_index in (0..LOOP_FRAMES).step_by(4) {
