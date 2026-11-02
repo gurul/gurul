@@ -1,9 +1,9 @@
 diff --git a/examples/avoiding-pair.rs b/examples/avoiding-pair.rs
 new file mode 100644
-index 0000000..1280978
+index 0000000..fed9ecb
 --- /dev/null
 +++ b/examples/avoiding-pair.rs
-@@ -0,0 +1,591 @@
+@@ -0,0 +1,789 @@
 +//! One red koi and one black koi swimming a small pond, each deciding its own turns.
 +//!
 +//! Every frame, each fish runs the same rule:
@@ -24,6 +24,8 @@ index 0000000..1280978
 +//! snapshot only `account_id` reaches the art (it seeds the scales), so upstream's
 +//! tests/fixtures/account-with-history.json with `account_id` set to 110717420 will do.
 +
++use std::borrow::Cow;
++use std::collections::BTreeMap;
 +use std::f64::consts::{PI, TAU};
 +use std::{env, fs};
 +
@@ -32,7 +34,7 @@ index 0000000..1280978
 +use git_koi::history::AccountSnapshot;
 +use git_koi::koi::{KoiDevelopment, StreakDevelopment, derive_koi_development};
 +use git_koi::motion::{Course, calculate_swim_pose};
-+use git_koi::output::{encode_gif, encode_png};
++use git_koi::output::{STATIC_EXPORT_SCALE, encode_png};
 +use git_koi::render::{
 +    FRAME_HEIGHT_PIXELS, FRAME_WIDTH_PIXELS, KoiFrame, calculate_body_length_pixels,
 +    render_posed_frame,
@@ -362,12 +364,12 @@ index 0000000..1280978
 +    closest
 +}
 +
-+/// The share of a 12 by 4 grid over the pond that some fish's head passes through.
++/// The share of a 12 by 4 grid over the swimming area that some head passes through.
 +fn coverage(orbit: &Orbit) -> f64 {
 +    let mut visited = [[false; 12]; 4];
 +    for head in orbit.heads.iter().flatten() {
-+        let column = (head[0] + f64::from(WIDTH) / 2.0) / f64::from(WIDTH) * 12.0;
-+        let row = (head[1] + f64::from(HEIGHT) / 2.0) / f64::from(HEIGHT) * 4.0;
++        let column = (head[0] + 384.0) / 768.0 * 12.0;
++        let row = (head[1] + 128.0) / 256.0 * 4.0;
 +        visited[(row as usize).min(3)][(column as usize).min(11)] = true;
 +    }
 +    visited.iter().flatten().filter(|&&cell| cell).count() as f64 / 48.0
@@ -457,6 +459,199 @@ index 0000000..1280978
 +    if touching { 0.0 } else { closest }
 +}
 +
++/// An 8 by 8 ordered dither threshold, between zero and one.
++fn dither(x: i32, y: i32) -> f64 {
++    let mut rank = 0;
++    for bit in 0..3 {
++        rank = (rank << 2) | ((((x ^ y) >> bit) & 1) << 1) | ((y >> bit) & 1);
++    }
++    (f64::from(rank) + 0.5) / 64.0
++}
++
++/// The still pond. GIF pixels are opaque or clear, so the shore dissolves by dithering:
++/// water thins out toward an uneven edge, and no box shows on any page color.
++struct Water {
++    pixels: Vec<[u8; 4]>,
++    /// Pixels with water and no dissolve, the only ones a fish may cross.
++    solid: Vec<bool>,
++}
++
++fn paint_water() -> Water {
++    const SHORE_FADE_PIXELS: f64 = 24.0;
++    const CORNER_RADIUS_PIXELS: f64 = 64.0;
++    const RAMP: [[u8; 4]; 4] = [
++        [18, 74, 96, 255],
++        [22, 86, 110, 255],
++        [27, 99, 122, 255],
++        [34, 113, 135, 255],
++    ];
++    let (half_width, half_height) = (f64::from(WIDTH) / 2.0, f64::from(HEIGHT) / 2.0);
++    let mut pixels = Vec::new();
++    let mut solid = Vec::new();
++    for pixel_y in 0..HEIGHT {
++        for pixel_x in 0..WIDTH {
++            let x = f64::from(pixel_x) + 0.5 - half_width;
++            let y = f64::from(pixel_y) + 0.5 - half_height;
++            // Distance inside a rounded rectangle, made uneven by a few slow waves.
++            let across = x.abs() - (half_width - 3.0 - CORNER_RADIUS_PIXELS);
++            let down = y.abs() - (half_height - 3.0 - CORNER_RADIUS_PIXELS);
++            let outside = across.max(0.0).hypot(down.max(0.0)) + across.max(down).min(0.0);
++            let shore = outside - CORNER_RADIUS_PIXELS
++                + 2.0 * (0.021 * x + 0.8).sin()
++                + 1.5 * (0.053 * x + 0.037 * y).sin();
++            let depth = (-shore / SHORE_FADE_PIXELS).clamp(0.0, 1.0);
++            let threshold = dither(pixel_x, pixel_y);
++            if depth <= threshold {
++                pixels.push([0; 4]);
++                solid.push(false);
++                continue;
++            }
++            let swell = (0.018 * x + 0.9 * (0.011 * y).sin()).sin();
++            let chop = (0.045 * y + 0.6 * (0.02 * x).sin()).sin();
++            let streak = (0.5 * y + 1.4 * (0.03 * x).sin()).sin();
++            let shallows = 0.35 * (1.0 - (-shore / 60.0).clamp(0.0, 1.0));
++            let tone = 0.42 + 0.2 * swell + 0.16 * chop + 0.1 * streak + shallows;
++            let shade = (tone * 3.0 + threshold).floor().clamp(0.0, 3.0) as usize;
++            pixels.push(RAMP[shade]);
++            solid.push(depth >= 1.0);
++        }
++    }
++    Water { pixels, solid }
++}
++
++/// Sparse light on the water: short dashes that open and close at fixed spots. Each
++/// repeats a whole number of times per loop, so the seam stays invisible.
++struct Glint {
++    x: i32,
++    y: i32,
++    half_length: f64,
++    period: usize,
++    phase: usize,
++}
++
++fn scatter_glints(water: &Water) -> Vec<Glint> {
++    const GLINT_COUNT: usize = 44;
++    let mut random = Random(0x51ED_270B_8F3C_11A7);
++    let mut glints = Vec::new();
++    while glints.len() < GLINT_COUNT {
++        let x = random.between(12.0, f64::from(WIDTH) - 12.0) as i32;
++        let y = random.between(12.0, f64::from(HEIGHT) - 12.0) as i32;
++        if !water.solid[(y * WIDTH + x) as usize] {
++            continue;
++        }
++        let period = LOOP_FRAMES / [3, 4, 5, 6, 8][(random.next() * 5.0) as usize];
++        glints.push(Glint {
++            x,
++            y,
++            half_length: random.between(2.0, 6.0),
++            period,
++            phase: (random.next() * period as f64) as usize,
++        });
++    }
++    glints
++}
++
++fn paint_glints(pixels: &mut [[u8; 4]], water: &Water, glints: &[Glint], frame: usize) {
++    const GLINT_FRAMES: usize = 40;
++    const LIGHT: [u8; 4] = [122, 190, 200, 255];
++    const BRIGHT: [u8; 4] = [190, 232, 236, 255];
++    for glint in glints {
++        let age = (frame + glint.phase) % glint.period;
++        if age >= GLINT_FRAMES {
++            continue;
++        }
++        let opening = (PI * age as f64 / GLINT_FRAMES as f64).sin();
++        let reach = (glint.half_length * opening).round() as i32;
++        for offset in -reach..=reach {
++            let index = (glint.y * WIDTH + glint.x + offset) as usize;
++            if water.solid[index] {
++                let is_core = opening > 0.7 && offset.abs() <= reach / 2;
++                pixels[index] = if is_core { BRIGHT } else { LIGHT };
++            }
++        }
++    }
++}
++
++/// A looping GIF that stores the pond once: every later frame holds only the pixels
++/// that changed, over a canvas that is kept. Nothing can be made clear again that way,
++/// so this panics if a frame tries; fish and glints must stay on solid water.
++fn encode_layered_gif(frames: &[KoiFrame]) -> Vec<u8> {
++    const CLEAR_INDEX: u8 = 0;
++    let scale = STATIC_EXPORT_SCALE as usize;
++    let (width, height) = (WIDTH as usize, HEIGHT as usize);
++    let mut encoder = gif::Encoder::new(
++        Vec::new(),
++        (width * scale) as u16,
++        (height * scale) as u16,
++        &[],
++    )
++    .unwrap();
++    encoder.set_repeat(gif::Repeat::Infinite).unwrap();
++    let mut previous: Option<&[[u8; 4]]> = None;
++    for (frame_index, frame) in frames.iter().enumerate() {
++        let current = frame.as_rgba_bytes().as_chunks::<4>().0;
++        let is_changed = |index: usize| match previous {
++            Some(previous) => {
++                assert!(current[index][3] != 0 || previous[index][3] == 0, "pixel went clear");
++                current[index] != previous[index]
++            }
++            None => current[index][3] != 0,
++        };
++        let changed: Vec<bool> = (0..current.len()).map(is_changed).collect();
++        let (mut left, mut top, mut right, mut bottom) = (width, height, 0, 0);
++        for (index, _) in changed.iter().enumerate().filter(|(_, is_changed)| **is_changed) {
++            left = left.min(index % width);
++            top = top.min(index / width);
++            right = right.max(index % width);
++            bottom = bottom.max(index / width);
++        }
++        if left > right {
++            (left, top, right, bottom) = (0, 0, 0, 0);
++        }
++        let mut palette_indices: BTreeMap<[u8; 3], u8> = BTreeMap::new();
++        let mut palette = vec![0; 3];
++        let mut buffer = Vec::new();
++        for y in top..=bottom {
++            let mut row = Vec::new();
++            for x in left..=right {
++                let index = y * width + x;
++                let palette_index = if changed[index] {
++                    let [red, green, blue, _] = current[index];
++                    let next = palette_indices.len() + 1;
++                    assert!(next < 256 || palette_indices.contains_key(&[red, green, blue]));
++                    *palette_indices.entry([red, green, blue]).or_insert_with(|| {
++                        palette.extend([red, green, blue]);
++                        next as u8
++                    })
++                } else {
++                    CLEAR_INDEX
++                };
++                row.extend(std::iter::repeat_n(palette_index, scale));
++            }
++            for _ in 0..scale {
++                buffer.extend_from_slice(&row);
++            }
++        }
++        let elapsed = |index: usize| (index as u16 * 200 + 15) / 30;
++        encoder
++            .write_frame(&gif::Frame {
++                delay: elapsed(frame_index + 1) - elapsed(frame_index),
++                dispose: gif::DisposalMethod::Keep,
++                transparent: Some(CLEAR_INDEX),
++                left: (left * scale) as u16,
++                top: (top * scale) as u16,
++                width: ((right + 1 - left) * scale) as u16,
++                height: ((bottom + 1 - top) * scale) as u16,
++                palette: Some(palette),
++                buffer: Cow::Owned(buffer),
++                ..gif::Frame::default()
++            })
++            .unwrap();
++        previous = Some(current);
++    }
++    encoder.into_inner().unwrap()
++}
++
 +fn search(size: u64, first_seed: u64, seed_count: u64) {
 +    let body_length = calculate_body_length_pixels(size);
 +    let point_count = body_length.round() as usize;
@@ -509,6 +704,9 @@ index 0000000..1280978
 +        coverage(&orbit) * 100.0
 +    );
 +
++    let water = paint_water();
++    let glints = scatter_glints(&water);
++    let mut fish_off_water = 0;
 +    let mut frames = Vec::new();
 +    let mut smallest_gap = f64::INFINITY;
 +    let mut smallest_gap_frame = 0;
@@ -524,23 +722,23 @@ index 0000000..1280978
 +            smallest_gap = gap;
 +            smallest_gap_frame = frame;
 +        }
-+        let pixels: Vec<[u8; 4]> = black
++        let mut pixels = water.pixels.clone();
++        paint_glints(&mut pixels, &water, &glints, frame);
++        for (index, (black_pixel, red_pixel)) in black
 +            .as_rgba_bytes()
 +            .as_chunks::<4>()
 +            .0
 +            .iter()
 +            .zip(red.as_rgba_bytes().as_chunks::<4>().0)
-+            .map(|(&under, &over)| if over[3] != 0 { over } else { under })
-+            .collect();
++            .enumerate()
++        {
++            let fish_pixel = if red_pixel[3] != 0 { red_pixel } else { black_pixel };
++            if fish_pixel[3] != 0 {
++                pixels[index] = *fish_pixel;
++                fish_off_water += usize::from(!water.solid[index]);
++            }
++        }
 +        frames.push(KoiFrame::from_rgba_pixels(pixels));
-+    }
-+    let mut edge_frames = 0;
-+    for frame in &frames {
-+        let touches_edge = frame.as_rgba_bytes().chunks(4).enumerate().any(|(index, pixel)| {
-+            let (x, y) = (index as i32 % WIDTH, index as i32 / WIDTH);
-+            pixel[3] != 0 && (x == 0 || y == 0 || x == WIDTH - 1 || y == HEIGHT - 1)
-+        });
-+        edge_frames += usize::from(touches_edge);
 +    }
 +    let mut free_overlapping = 0;
 +    for frame in 0..LOOP_FRAMES {
@@ -554,10 +752,10 @@ index 0000000..1280978
 +        free_overlapping += usize::from(touching);
 +    }
 +    println!(
-+        "with rule: {overlapping_frames} touching frames of {LOOP_FRAMES}, smallest gap {smallest_gap:.1}px at frame {smallest_gap_frame}, {edge_frames} frames at the canvas edge"
++        "with rule: {overlapping_frames} touching frames of {LOOP_FRAMES}, smallest gap {smallest_gap:.1}px at frame {smallest_gap_frame}, {fish_off_water} fish pixels off solid water"
 +    );
 +    println!("without rule: {free_overlapping} touching frames of {LOOP_FRAMES}");
-+    fs::write(output, encode_gif(&frames).unwrap()).unwrap();
++    fs::write(output, encode_layered_gif(&frames)).unwrap();
 +    fs::create_dir_all(contact_dir).unwrap();
 +    for frame_index in (0..LOOP_FRAMES).step_by(4) {
 +        fs::write(
@@ -770,7 +968,7 @@ index 1fe4b33..069ed70 100644
  
  /// How the koi's body and fins look in one frame. Paired values list the left fin,
 diff --git a/src/render.rs b/src/render.rs
-index 31f22e4..6c081f5 100644
+index 31f22e4..688f433 100644
 --- a/src/render.rs
 +++ b/src/render.rs
 @@ -12,7 +12,7 @@
@@ -789,9 +987,9 @@ index 31f22e4..6c081f5 100644
 -pub const FRAME_WIDTH_PIXELS: u32 = 256;
 -/// Height of the native canvas; the canvas is square.
 -pub const FRAME_HEIGHT_PIXELS: u32 = FRAME_WIDTH_PIXELS;
-+pub const FRAME_WIDTH_PIXELS: u32 = 768;
++pub const FRAME_WIDTH_PIXELS: u32 = 816;
 +/// Height of the native canvas; a wide pond for a README's full width.
-+pub const FRAME_HEIGHT_PIXELS: u32 = 256;
++pub const FRAME_HEIGHT_PIXELS: u32 = 304;
  
  /// A renderer-owned, fixed-size frame with row-major RGBA pixels.
  #[derive(Debug, Eq, PartialEq)]
@@ -888,7 +1086,7 @@ index 93f0305..df99a13 100644
  }
  
 diff --git a/tests/render.rs b/tests/render.rs
-index e43fe7a..9dde2da 100644
+index e43fe7a..b2bd5ad 100644
 --- a/tests/render.rs
 +++ b/tests/render.rs
 @@ -496,7 +496,7 @@ fn png_output_doubles_each_pixel_and_repeats_exactly() {
@@ -896,7 +1094,7 @@ index e43fe7a..9dde2da 100644
      let mut decoded_pixels = vec![0; png_reader.output_buffer_size().unwrap()];
      let frame_info = png_reader.next_frame(&mut decoded_pixels).unwrap();
 -    assert_eq!((frame_info.width, frame_info.height), (512, 512));
-+    assert_eq!((frame_info.width, frame_info.height), (1536, 512));
++    assert_eq!((frame_info.width, frame_info.height), (1632, 608));
      assert_eq!(frame_info.color_type, png::ColorType::Rgba);
      for (pixel_index, native_channels) in koi_frame
          .as_rgba_bytes()
