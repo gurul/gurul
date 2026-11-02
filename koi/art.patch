@@ -1,16 +1,28 @@
 diff --git a/examples/avoiding-pair.rs b/examples/avoiding-pair.rs
 new file mode 100644
-index 0000000..0a4eede
+index 0000000..8412a32
 --- /dev/null
 +++ b/examples/avoiding-pair.rs
-@@ -0,0 +1,1006 @@
+@@ -0,0 +1,1214 @@
 +//! One red koi and one black koi swimming a small pond, each deciding its own turns.
 +//!
 +//! Every frame, each fish runs the same rule:
 +//!   1. Head for the next point on my own route.
 +//!   2. If the other fish is inside my personal space, turn away from it instead;
 +//!      the closer it is, the more this wins. (Couzin et al. 2002, zone of repulsion.)
-+//!   3. Turn no faster than a fish can.
++//!   3. Keep off the bank, turning away before reaching it, as a fish does; nothing
++//!      stops a fish dead.
++//!   4. Turn no faster than a fish can.
++//!
++//! The body does not copy the head's path, which is what folded it into a U in tight
++//! turns. A fish bends into a C and recoils straight (Wu et al. 2007, koi), so the line
++//! starts from that path and is held inside the limits a fish body has. The limits are
++//! the mean plus one SD for voluntary turns in Howe & Astley 2020; those are slender
++//! giant danios, so their extreme values would be too loose for a stocky koi.
++//!
++//! Sources: Wu, Yang & Zeng 2007, J Exp Biol 210:4379 (koi routine turns; the radius is
++//! as tabled in Integr Org Biol 1:obz014, Table 2); Howe & Astley 2020,
++//! J Exp Zool A, doi:10.1002/jez.2398; Di Santo et al. 2021, PNAS 118:e2113206118.
 +//!
 +//! Neither fish knows the other's route. The routes are closed loops, so the whole
 +//! system is driven with a period of one GIF loop and settles into an orbit that
@@ -19,8 +31,9 @@ index 0000000..0a4eede
 +//! Usage:
 +//!   avoiding-pair search SIZE FIRST_SEED SEED_COUNT
 +//!   avoiding-pair render SIZE SEED SNAPSHOT OUTPUT.gif CONTACT_DIR
++//!   avoiding-pair measure SIZE SEED
 +//!
-+//! The published GIF is `render 1500 58346`, at upstream commit 7305e9b. From the
++//! The published GIF is `render 1500 549141`, at upstream commit 7305e9b. From the
 +//! snapshot only `account_id` reaches the art (it seeds the scales), so upstream's
 +//! tests/fixtures/account-with-history.json with `account_id` set to 110717420 will do.
 +
@@ -33,11 +46,11 @@ index 0000000..0a4eede
 +use git_koi::coat::KoiBody;
 +use git_koi::history::AccountSnapshot;
 +use git_koi::koi::{KoiDevelopment, StreakDevelopment, derive_koi_development};
-+use git_koi::motion::{Course, calculate_swim_pose};
++use git_koi::motion::{Course, SwimPose, calculate_swim_pose};
 +use git_koi::output::{STATIC_EXPORT_SCALE, encode_png};
 +use git_koi::render::{
 +    FRAME_HEIGHT_PIXELS, FRAME_WIDTH_PIXELS, KoiFrame, calculate_body_length_pixels,
-+    render_posed_frame,
++    calculate_posed_spine, render_posed_frame,
 +};
 +
 +/// Thirty-two seconds at 15 frames a second: a whole number of cruise loops, so the tail
@@ -51,7 +64,23 @@ index 0000000..0a4eede
 +/// By this distance, turning away has fully taken over.
 +const TOO_CLOSE_PIXELS: f64 = 44.0;
 +const AWAY_STRENGTH: f64 = 8.0;
-+const TIGHTEST_TURN_RADIUS_PIXELS: f64 = 30.0;
++/// About 0.31 body lengths, the koi turning radius of Wu et al. 2007.
++const TIGHTEST_TURN_RADIUS_PIXELS: f64 = 31.0;
++/// The most any point of the body may bend, per body length: 3.14 + 1.52 SD.
++const MOST_CURVATURE_PER_BODY_LENGTH: f64 = 4.66;
++/// The most the whole body may bend, summed head to tail: 1.27 + 0.74 SD per body length,
++/// which over one body length is radians, about 115 degrees.
++const MOST_WHOLE_BODY_BEND_RADIANS: f64 = 2.01;
++/// Share of the bend allowed at the head. The skull is rigid and the front third hardly
++/// bends; bending builds to its full range by midbody (Di Santo et al. 2021).
++const HEAD_BEND_SHARE: f64 = 0.25;
++/// How much of the tail beat is given up at the limit of a bend.
++const TURNING_BEAT_EASING: f64 = 0.7;
++/// Inside this distance of the bank, a fish starts to turn back toward open water.
++const BANK_SENSE_PIXELS: f64 = 44.0;
++const BANK_STRENGTH: f64 = 8.0;
++/// A head may drift this far past the reach; the render checks it stays on solid water.
++const BANK_OVERRUN_PIXELS: f64 = 8.0;
 +const STEERING_GAIN: f64 = 0.16;
 +const TURN_SMOOTHING: f64 = 0.3;
 +/// Heads stay this far from the frame center, on each axis.
@@ -209,7 +238,16 @@ index 0000000..0a4eede
 +        }
 +    }
 +
-+    // Rule 3: turn toward the desire, as fast as a fish can, and swim on.
++    // Rule 3: the bank pushes me back toward open water.
++    for axis in 0..2 {
++        let depth = fish.head[axis].abs() - (POND_REACH_PIXELS[axis] - BANK_SENSE_PIXELS);
++        if depth > 0.0 {
++            let closeness = (depth / BANK_SENSE_PIXELS).min(1.0);
++            desire[axis] -= fish.head[axis].signum() * BANK_STRENGTH * closeness * closeness;
++        }
++    }
++
++    // Rule 4: turn toward the desire, as fast as a fish can, and swim on.
 +    let speed = stroke_speed(stroke_frame) * route_speed * schedule;
 +    let tightest_turn = speed / TIGHTEST_TURN_RADIUS_PIXELS;
 +    let wanted = desire[1].atan2(desire[0]);
@@ -217,12 +255,10 @@ index 0000000..0a4eede
 +    let turn = (STEERING_GAIN * error).clamp(-tightest_turn, tightest_turn);
 +    let turning = fish.turning + TURN_SMOOTHING * (turn - fish.turning);
 +    let heading = fish.heading + turning;
-+    let mut head = [
++    let head = [
 +        fish.head[0] + speed * heading.cos(),
 +        fish.head[1] + speed * heading.sin(),
 +    ];
-+    head[0] = head[0].clamp(-POND_REACH_PIXELS[0], POND_REACH_PIXELS[0]);
-+    head[1] = head[1].clamp(-POND_REACH_PIXELS[1], POND_REACH_PIXELS[1]);
 +    (
 +        Fish {
 +            head,
@@ -310,9 +346,58 @@ index 0000000..0a4eede
 +    }
 +}
 +
-+/// The body's center line in a frame, one pixel of arc between points, head first. It
-+/// walks back through the loop, wrapping, and is lightly smoothed.
++/// The share of the bending limit allowed at a point of the body, head at zero.
++fn bend_share(along_fraction: f64) -> f64 {
++    let ramp = (along_fraction / 0.5).clamp(0.0, 1.0);
++    HEAD_BEND_SHARE + (1.0 - HEAD_BEND_SHARE) * ramp * ramp * (3.0 - 2.0 * ramp)
++}
++
++/// Hold a line of one-pixel steps inside what a fish body can do, keeping the head where
++/// it is. Past the limits the tail swings wide of the path, as a real tail does. Both
++/// limits are continuous, so a bend grows and fades without a pop, and the result depends
++/// only on the path, so the loop still closes.
++fn limit_bend(line: &[Point]) -> Vec<Point> {
++    let steps = line.len() - 1;
++    let most_per_pixel = MOST_CURVATURE_PER_BODY_LENGTH / line.len() as f64;
++    let directions: Vec<f64> = line
++        .windows(2)
++        .map(|pair| (pair[1][1] - pair[0][1]).atan2(pair[1][0] - pair[0][0]))
++        .collect();
++    let mut bends: Vec<f64> = directions
++        .windows(2)
++        .enumerate()
++        .map(|(index, pair)| {
++            let bend = (pair[1] - pair[0] + PI).rem_euclid(TAU) - PI;
++            let most = most_per_pixel * bend_share(index as f64 / steps as f64);
++            bend.clamp(-most, most)
++        })
++        .collect();
++    let whole_body_bend: f64 = bends.iter().map(|bend| bend.abs()).sum();
++    if whole_body_bend > MOST_WHOLE_BODY_BEND_RADIANS {
++        let scale = MOST_WHOLE_BODY_BEND_RADIANS / whole_body_bend;
++        bends.iter_mut().for_each(|bend| *bend *= scale);
++    }
++    let mut limited = vec![line[0]];
++    let mut direction = directions[0];
++    let mut point = line[0];
++    for index in 0..steps {
++        point = [point[0] + direction.cos(), point[1] + direction.sin()];
++        limited.push(point);
++        if let Some(bend) = bends.get(index) {
++            direction += bend;
++        }
++    }
++    limited
++}
++
++/// The body's center line in a frame, one pixel of arc between points, head first.
 +fn center_line(heads: &[Point], frame: usize, point_count: usize) -> Vec<Point> {
++    limit_bend(&head_path(heads, frame, point_count))
++}
++
++/// Where the head has been, one pixel of arc between points, newest first. It walks back
++/// through the loop, wrapping, and is lightly smoothed.
++fn head_path(heads: &[Point], frame: usize, point_count: usize) -> Vec<Point> {
 +    const SMOOTHING_REACH: usize = 3;
 +    let padded = point_count + 2 * SMOOTHING_REACH + 1;
 +    let mut points = Vec::with_capacity(padded);
@@ -375,6 +460,32 @@ index 0000000..0a4eede
 +    visited.iter().flatten().filter(|&&cell| cell).count() as f64 / 48.0
 +}
 +
++/// Frames with a head well past the reach of the pond, either fish.
++fn on_bank(orbit: &Orbit) -> usize {
++    orbit
++        .heads
++        .iter()
++        .flatten()
++        .filter(|head| {
++            head[0].abs() > POND_REACH_PIXELS[0] + BANK_OVERRUN_PIXELS
++                || head[1].abs() > POND_REACH_PIXELS[1] + BANK_OVERRUN_PIXELS
++        })
++        .count()
++}
++
++/// The share of frames, across both fish, where the limits changed the body's shape.
++fn limited_share(orbit: &Orbit, point_count: usize) -> f64 {
++    let mut limited = 0;
++    for heads in &orbit.heads {
++        for frame in 0..LOOP_FRAMES {
++            let path = head_path(heads, frame, point_count);
++            let body = limit_bend(&path);
++            limited += usize::from(distance(path[point_count - 1], body[point_count - 1]) > 1.0);
++        }
++    }
++    limited as f64 / (2 * LOOP_FRAMES) as f64
++}
++
 +fn count_dodges(dodging: &[bool]) -> usize {
 +    (0..dodging.len())
 +        .filter(|&frame| dodging[frame] && !dodging[(frame + dodging.len() - 1) % dodging.len()])
@@ -403,15 +514,83 @@ index 0000000..0a4eede
 +    development
 +}
 +
-+fn render_fish(
-+    development: &KoiDevelopment,
-+    body: KoiBody,
++/// The shape of a drawn spine: the tightest radius over any 10 pixels of it, and how far
++/// its direction swings head to tail.
++fn spine_shape(spine: &[Point]) -> (f64, f64) {
++    const CHORD: usize = 4;
++    const WINDOW: usize = 10;
++    let mut angles: Vec<f64> = Vec::new();
++    for index in 0..spine.len() - CHORD {
++        let (from, to) = (spine[index + CHORD], spine[index]);
++        let angle = (to[1] - from[1]).atan2(to[0] - from[0]);
++        let unwrapped = match angles.last() {
++            Some(&last) => last + (angle - last + PI).rem_euclid(TAU) - PI,
++            None => angle,
++        };
++        angles.push(unwrapped);
++    }
++    let tightest = angles
++        .windows(WINDOW + 1)
++        .map(|window| WINDOW as f64 / (window[WINDOW] - window[0]).abs().max(1e-9))
++        .fold(f64::INFINITY, f64::min);
++    let high = angles.iter().copied().fold(f64::NEG_INFINITY, f64::max);
++    let low = angles.iter().copied().fold(f64::INFINITY, f64::min);
++    (tightest, high - low)
++}
++
++/// How far a line's direction swings along its length.
++fn spine_bend(line: &[Point]) -> f64 {
++    spine_shape(line).1
++}
++
++fn measure(size: u64, seed: u64) {
++    let body_length = calculate_body_length_pixels(size);
++    let point_count = body_length.round() as usize;
++    let orbit = simulate(&invent_routes(seed), body_length, true);
++    println!(
++        "limits active on {:.1}% of frames, {} head-frames past the bank",
++        100.0 * limited_share(&orbit, point_count),
++        on_bank(&orbit)
++    );
++    for index in 0..2 {
++        let offset = if index == 0 { 0 } else { BLACK_FRAME_OFFSET };
++        let shapes: Vec<(f64, f64)> = (0..LOOP_FRAMES)
++            .map(|frame| {
++                let pose = fish_pose(&orbit, index, frame, point_count, offset);
++                spine_shape(&calculate_posed_spine(size, &pose))
++            })
++            .collect();
++        let tightest = shapes.iter().map(|s| s.0).fold(f64::INFINITY, f64::min);
++        let widest = shapes.iter().map(|s| s.1).fold(0.0, f64::max);
++        let jump = (0..LOOP_FRAMES)
++            .map(|frame| (shapes[(frame + 1) % LOOP_FRAMES].1 - shapes[frame].1).abs())
++            .fold(0.0, f64::max);
++        // The same bend without the tail beat, so a snap in the body itself shows up.
++        let body_bends: Vec<f64> = (0..LOOP_FRAMES)
++            .map(|frame| spine_shape(&center_line(&orbit.heads[index], frame, point_count)).1)
++            .collect();
++        let snap = (0..LOOP_FRAMES)
++            .map(|frame| (body_bends[(frame + 1) % LOOP_FRAMES] - body_bends[frame]).abs())
++            .fold(0.0, f64::max);
++        println!("  body line alone: widest {:.0}deg, biggest change {:.1}deg/frame",
++            body_bends.iter().copied().fold(0.0, f64::max).to_degrees(), snap.to_degrees());
++        let over = |limit: f64| shapes.iter().filter(|s| s.1 > limit).count();
++        let tight = |limit: f64| shapes.iter().filter(|s| s.0 < limit).count();
++        let worst = (0..LOOP_FRAMES).max_by(|&a, &b| shapes[a].1.total_cmp(&shapes[b].1)).unwrap();
++        println!(
++            "fish {index}: tightest r {tightest:.1}px, widest bend {:.0}deg at frame {worst}, biggest bend change {:.1}deg/frame, frames over 90deg {} over 120deg {} over 150deg {}, r<25px {} r<15px {}",
++            widest.to_degrees(), jump.to_degrees(), over(90f64.to_radians()), over(120f64.to_radians()), over(150f64.to_radians()), tight(25.0), tight(15.0)
++        );
++    }
++}
++
++fn fish_pose(
 +    orbit: &Orbit,
 +    index: usize,
 +    frame: usize,
 +    point_count: usize,
-+) -> KoiFrame {
-+    let offset = if index == 0 { 0 } else { BLACK_FRAME_OFFSET };
++    offset: u32,
++) -> SwimPose {
 +    let mut pose = calculate_swim_pose(Behavior::Cruise, frame as u32 + offset);
 +    let line: &'static [Point] =
 +        Box::leak(center_line(&orbit.heads[index], frame, point_count).into_boxed_slice());
@@ -423,6 +602,24 @@ index 0000000..0a4eede
 +    let flare_shift = CRUISE_INSIDE_FLARE_RADIANS * (1.0 - turn_share);
 +    pose.side_fin_openings_radians[0] += flare_shift;
 +    pose.side_fin_openings_radians[1] -= flare_shift;
++    // A koi's single-beat turn is one bend and its recoil (Wu et al. 2007), not a bend with
++    // full strokes laid over it, so the beat eases while bent. This easing is a choice made
++    // for this art, not a measured value; it keeps the drawn body near the bend limit.
++    let bend_used = (spine_bend(line) / MOST_WHOLE_BODY_BEND_RADIANS).min(1.0);
++    pose.wave_strength *= 1.0 - TURNING_BEAT_EASING * bend_used * bend_used;
++    pose
++}
++
++fn render_fish(
++    development: &KoiDevelopment,
++    body: KoiBody,
++    orbit: &Orbit,
++    index: usize,
++    frame: usize,
++    point_count: usize,
++) -> KoiFrame {
++    let offset = if index == 0 { 0 } else { BLACK_FRAME_OFFSET };
++    let pose = fish_pose(orbit, index, frame, point_count, offset);
 +    render_posed_frame(development, body, &pose)
 +}
 +
@@ -870,17 +1067,27 @@ index 0000000..0a4eede
 +        if orbit.closure_pixels > 0.01 {
 +            continue;
 +        }
++        // No fish reaches the bank's limit. Every U-turn in a pond this wide needs a real
++        // C-bend, so the limits do act, but not for most of the swim.
++        if on_bank(&orbit) > 0 {
++            continue;
++        }
++        let limited = limited_share(&orbit, point_count);
++        if limited > 0.55 {
++            continue;
++        }
 +        let closest = closest_bodies(&orbit, point_count);
 +        let dodges = count_dodges(&orbit.dodging);
 +        let share = orbit.dodging.iter().filter(|&&dodge| dodge).count() as f64 / LOOP_FRAMES as f64;
 +        let covered = coverage(&orbit);
-+        if closest < 42.0 || dodges < 3 || covered < 0.7 {
++        if closest < 44.0 || dodges < 2 || covered < 0.67 {
 +            continue;
 +        }
 +        let free = simulate(&routes, body_length, false);
 +        let free_closest = closest_bodies(&free, point_count);
 +        println!(
-+            "seed {seed} closest {closest:.1} without-rule {free_closest:.1} dodges {dodges} covered {:.0}% dodging {:.0}% closure {:.5} routes {:.0}/{:.0}",
++            "seed {seed} limited {:.0}% closest {closest:.1} without-rule {free_closest:.1} dodges {dodges} covered {:.0}% dodging {:.0}% closure {:.5} routes {:.0}/{:.0}",
++            limited * 100.0,
 +            covered * 100.0,
 +            share * 100.0,
 +            orbit.closure_pixels,
@@ -1007,7 +1214,8 @@ index 0000000..0a4eede
 +            &arguments[4],
 +            &arguments[5],
 +        ),
-+        _ => panic!("search or render"),
++        "measure" => measure(arguments[1].parse().unwrap(), arguments[2].parse().unwrap()),
++        _ => panic!("search, render, or measure"),
 +    }
 +}
 diff --git a/src/coat.rs b/src/coat.rs
@@ -1185,7 +1393,7 @@ index 1fe4b33..069ed70 100644
  
  /// How the koi's body and fins look in one frame. Paired values list the left fin,
 diff --git a/src/render.rs b/src/render.rs
-index 31f22e4..688f433 100644
+index 31f22e4..2071046 100644
 --- a/src/render.rs
 +++ b/src/render.rs
 @@ -12,7 +12,7 @@
@@ -1231,7 +1439,7 @@ index 31f22e4..688f433 100644
          Course::Hover { drift_pixels, .. } => {
              let hover_fit = fit_hover_loop(behavior, &koi_anatomy);
              [0, 1].map(|axis_index| {
-@@ -103,6 +102,26 @@ pub fn render_swim_frame(
+@@ -103,6 +102,35 @@ pub fn render_swim_frame(
      )
  }
  
@@ -1250,6 +1458,15 @@ index 31f22e4..688f433 100644
 +    )
 +}
 +
++/// The center of a koi's body as drawn in a pose, wave included: head first, in native
++/// pixels. For measuring the shape a pose really gives the fish.
++pub fn calculate_posed_spine(total_contributions: u64, swim_pose: &SwimPose) -> Vec<[f64; 2]> {
++    build_spine(&calculate_anatomy(total_contributions), swim_pose)
++        .iter()
++        .map(|point| point.position)
++        .collect()
++}
++
 +/// How long a koi's body is at a contribution total, in native pixels.
 +pub fn calculate_body_length_pixels(total_contributions: u64) -> f64 {
 +    calculate_anatomy(total_contributions).body_length_pixels
@@ -1258,7 +1475,7 @@ index 31f22e4..688f433 100644
  /// Where the view is centered: on the koi itself for the still image, or at a point
  /// fixed for the whole loop.
  enum Framing {
-@@ -140,7 +159,7 @@ fn fit_hover_loop(behavior: Behavior, koi_anatomy: &KoiAnatomy) -> HoverFit {
+@@ -140,7 +168,7 @@ fn fit_hover_loop(behavior: Behavior, koi_anatomy: &KoiAnatomy) -> HoverFit {
              }
              let drift_pixels = match swim_pose.course {
                  Course::Hover { drift_pixels, .. } => drift_pixels,
@@ -1267,7 +1484,7 @@ index 31f22e4..688f433 100644
              };
              ([min_corner, max_corner], drift_pixels)
          })
-@@ -780,6 +799,12 @@ fn build_spine(koi_anatomy: &KoiAnatomy, swim_pose: &SwimPose) -> Vec<CurvePoint
+@@ -780,6 +808,12 @@ fn build_spine(koi_anatomy: &KoiAnatomy, swim_pose: &SwimPose) -> Vec<CurvePoint
                  })
                  .collect()
          }
