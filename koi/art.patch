@@ -1,9 +1,9 @@
 diff --git a/examples/avoiding-pair.rs b/examples/avoiding-pair.rs
 new file mode 100644
-index 0000000..8477086
+index 0000000..1280978
 --- /dev/null
 +++ b/examples/avoiding-pair.rs
-@@ -0,0 +1,570 @@
+@@ -0,0 +1,591 @@
 +//! One red koi and one black koi swimming a small pond, each deciding its own turns.
 +//!
 +//! Every frame, each fish runs the same rule:
@@ -20,7 +20,7 @@ index 0000000..8477086
 +//!   avoiding-pair search SIZE FIRST_SEED SEED_COUNT
 +//!   avoiding-pair render SIZE SEED SNAPSHOT OUTPUT.gif CONTACT_DIR
 +//!
-+//! The published GIF is `render 1500 33961`, at upstream commit 7305e9b. From the
++//! The published GIF is `render 1500 58346`, at upstream commit 7305e9b. From the
 +//! snapshot only `account_id` reaches the art (it seeds the scales), so upstream's
 +//! tests/fixtures/account-with-history.json with `account_id` set to 110717420 will do.
 +
@@ -33,11 +33,14 @@ index 0000000..8477086
 +use git_koi::koi::{KoiDevelopment, StreakDevelopment, derive_koi_development};
 +use git_koi::motion::{Course, calculate_swim_pose};
 +use git_koi::output::{encode_gif, encode_png};
-+use git_koi::render::{KoiFrame, calculate_body_length_pixels, render_posed_frame};
++use git_koi::render::{
++    FRAME_HEIGHT_PIXELS, FRAME_WIDTH_PIXELS, KoiFrame, calculate_body_length_pixels,
++    render_posed_frame,
++};
 +
-+/// Sixteen seconds at 15 frames a second: a whole number of cruise loops, so the tail
++/// Thirty-two seconds at 15 frames a second: a whole number of cruise loops, so the tail
 +/// beat, fins, and breathing close along with the swimming.
-+const LOOP_FRAMES: usize = 240;
++const LOOP_FRAMES: usize = 480;
 +const SETTLING_LOOPS: usize = 80;
 +/// The route point a fish heads for, this many frames ahead of now.
 +const LEAD_FRAMES: usize = 12;
@@ -49,8 +52,11 @@ index 0000000..8477086
 +const TIGHTEST_TURN_RADIUS_PIXELS: f64 = 30.0;
 +const STEERING_GAIN: f64 = 0.16;
 +const TURN_SMOOTHING: f64 = 0.3;
-+/// Heads stay this far from the frame center, on either axis.
-+const POND_REACH_PIXELS: f64 = 92.0;
++/// Heads stay this far from the frame center, on each axis.
++const POND_REACH_PIXELS: [f64; 2] = [340.0, 92.0];
++/// Canvas size, for the checks on rendered pixels.
++const WIDTH: i32 = FRAME_WIDTH_PIXELS as i32;
++const HEIGHT: i32 = FRAME_HEIGHT_PIXELS as i32;
 +/// The black fish's strokes run this many frames behind the red fish's.
 +const BLACK_FRAME_OFFSET: u32 = 37;
 +/// Must match the cruise style's fin flare on the inside of its clockwise lap.
@@ -87,15 +93,15 @@ index 0000000..8477086
 +impl Route {
 +    fn invent(random: &mut Random) -> Self {
 +        let turns = [1.0, 2.0, 3.0];
-+        let radii = [54.0, 30.0, 12.0];
++        let radii = [(300.0, 55.0), (70.0, 32.0), (26.0, 14.0)];
 +        let waves = turns
 +            .iter()
 +            .zip(radii)
-+            .map(|(&turn, radius)| {
++            .map(|(&turn, (radius_x, radius_y))| {
 +                (
 +                    turn,
-+                    radius * random.between(0.5, 1.2),
-+                    radius * random.between(0.5, 1.2),
++                    radius_x * random.between(0.75, 1.1),
++                    radius_y * random.between(0.6, 1.2),
 +                    random.between(0.0, TAU),
 +                    random.between(0.0, TAU),
 +                )
@@ -120,12 +126,10 @@ index 0000000..8477086
 +            .sum()
 +    }
 +
-+    fn reach(&self) -> f64 {
++    /// How far the route strays from the center along an axis.
++    fn reach(&self, axis: usize) -> f64 {
 +        (0..LOOP_FRAMES)
-+            .map(|frame| {
-+                let point = self.at(frame);
-+                point[0].abs().max(point[1].abs())
-+            })
++            .map(|frame| self.at(frame)[axis].abs())
 +            .fold(0.0, f64::max)
 +    }
 +}
@@ -215,8 +219,8 @@ index 0000000..8477086
 +        fish.head[0] + speed * heading.cos(),
 +        fish.head[1] + speed * heading.sin(),
 +    ];
-+    head[0] = head[0].clamp(-POND_REACH_PIXELS, POND_REACH_PIXELS);
-+    head[1] = head[1].clamp(-POND_REACH_PIXELS, POND_REACH_PIXELS);
++    head[0] = head[0].clamp(-POND_REACH_PIXELS[0], POND_REACH_PIXELS[0]);
++    head[1] = head[1].clamp(-POND_REACH_PIXELS[1], POND_REACH_PIXELS[1]);
 +    (
 +        Fish {
 +            head,
@@ -358,6 +362,17 @@ index 0000000..8477086
 +    closest
 +}
 +
++/// The share of a 12 by 4 grid over the pond that some fish's head passes through.
++fn coverage(orbit: &Orbit) -> f64 {
++    let mut visited = [[false; 12]; 4];
++    for head in orbit.heads.iter().flatten() {
++        let column = (head[0] + f64::from(WIDTH) / 2.0) / f64::from(WIDTH) * 12.0;
++        let row = (head[1] + f64::from(HEIGHT) / 2.0) / f64::from(HEIGHT) * 4.0;
++        visited[(row as usize).min(3)][(column as usize).min(11)] = true;
++    }
++    visited.iter().flatten().filter(|&&cell| cell).count() as f64 / 48.0
++}
++
 +fn count_dodges(dodging: &[bool]) -> usize {
 +    (0..dodging.len())
 +        .filter(|&frame| dodging[frame] && !dodging[(frame + dodging.len() - 1) % dodging.len()])
@@ -401,7 +416,8 @@ index 0000000..8477086
 +    pose.course = Course::Trail { center_line: line };
 +    // The cruise flares the right fin, for its clockwise lap; flare whichever fin is
 +    // inside this turn instead.
-+    let turn_share = (orbit.turnings[index][frame] * TIGHTEST_TURN_RADIUS_PIXELS / 2.4).clamp(-1.0, 1.0);
++    let turn_share = (orbit.turnings[index][frame] * TIGHTEST_TURN_RADIUS_PIXELS / 3.2)
++        .clamp(-1.0, 1.0);
 +    let flare_shift = CRUISE_INSIDE_FLARE_RADIANS * (1.0 - turn_share);
 +    pose.side_fin_openings_radians[0] += flare_shift;
 +    pose.side_fin_openings_radians[1] -= flare_shift;
@@ -413,11 +429,11 @@ index 0000000..8477086
 +    let edge = |frame: &KoiFrame| -> Vec<(i32, i32)> {
 +        let alpha: Vec<bool> = frame.as_rgba_bytes().chunks(4).map(|px| px[3] != 0).collect();
 +        let at = |x: i32, y: i32| {
-+            (0..256).contains(&x) && (0..256).contains(&y) && alpha[(y * 256 + x) as usize]
++            (0..WIDTH).contains(&x) && (0..HEIGHT).contains(&y) && alpha[(y * WIDTH + x) as usize]
 +        };
 +        let mut pixels = Vec::new();
-+        for y in 0..256 {
-+            for x in 0..256 {
++        for y in 0..HEIGHT {
++            for x in 0..WIDTH {
 +                if at(x, y) && !(at(x - 1, y) && at(x + 1, y) && at(x, y - 1) && at(x, y + 1)) {
 +                    pixels.push((x, y));
 +                }
@@ -447,8 +463,10 @@ index 0000000..8477086
 +    for seed in first_seed..first_seed + seed_count {
 +        let routes = invent_routes(seed);
 +        let lengths = [routes[0].length(), routes[1].length()];
-+        let reach = routes[0].reach().max(routes[1].reach());
-+        if !lengths.iter().all(|length| (440.0..680.0).contains(length)) || reach > 88.0 {
++        // Each fish crosses most of the pond, at a calm pace, and stays inside it.
++        let is_wide = routes.iter().all(|route| (285.0..332.0).contains(&route.reach(0)));
++        let is_tall = routes.iter().all(|route| route.reach(1) < 88.0);
++        if !lengths.iter().all(|length| (1100.0..1800.0).contains(length)) || !is_wide || !is_tall {
 +            continue;
 +        }
 +        let orbit = simulate(&routes, body_length, true);
@@ -458,13 +476,15 @@ index 0000000..8477086
 +        let closest = closest_bodies(&orbit, point_count);
 +        let dodges = count_dodges(&orbit.dodging);
 +        let share = orbit.dodging.iter().filter(|&&dodge| dodge).count() as f64 / LOOP_FRAMES as f64;
-+        if closest < 42.0 || dodges < 2 {
++        let covered = coverage(&orbit);
++        if closest < 42.0 || dodges < 3 || covered < 0.7 {
 +            continue;
 +        }
 +        let free = simulate(&routes, body_length, false);
 +        let free_closest = closest_bodies(&free, point_count);
 +        println!(
-+            "seed {seed} closest {closest:.1} without-rule {free_closest:.1} dodges {dodges} dodging {:.0}% closure {:.5} routes {:.0}/{:.0}",
++            "seed {seed} closest {closest:.1} without-rule {free_closest:.1} dodges {dodges} covered {:.0}% dodging {:.0}% closure {:.5} routes {:.0}/{:.0}",
++            covered * 100.0,
 +            share * 100.0,
 +            orbit.closure_pixels,
 +            lengths[0],
@@ -483,9 +503,10 @@ index 0000000..8477086
 +    let orbit = simulate(&routes, body_length, true);
 +    let free = simulate(&routes, body_length, false);
 +    println!(
-+        "body {body_length:.1}px, closure {:.6}px, dodges {}",
++        "body {body_length:.1}px, closure {:.6}px, dodges {}, covered {:.0}%",
 +        orbit.closure_pixels,
-+        count_dodges(&orbit.dodging)
++        count_dodges(&orbit.dodging),
++        coverage(&orbit) * 100.0
 +    );
 +
 +    let mut frames = Vec::new();
@@ -516,8 +537,8 @@ index 0000000..8477086
 +    let mut edge_frames = 0;
 +    for frame in &frames {
 +        let touches_edge = frame.as_rgba_bytes().chunks(4).enumerate().any(|(index, pixel)| {
-+            let (x, y) = (index % 256, index / 256);
-+            pixel[3] != 0 && (x == 0 || y == 0 || x == 255 || y == 255)
++            let (x, y) = (index as i32 % WIDTH, index as i32 / WIDTH);
++            pixel[3] != 0 && (x == 0 || y == 0 || x == WIDTH - 1 || y == HEIGHT - 1)
 +        });
 +        edge_frames += usize::from(touches_edge);
 +    }
@@ -749,9 +770,31 @@ index 1fe4b33..069ed70 100644
  
  /// How the koi's body and fins look in one frame. Paired values list the left fin,
 diff --git a/src/render.rs b/src/render.rs
-index 31f22e4..450acfe 100644
+index 31f22e4..6c081f5 100644
 --- a/src/render.rs
 +++ b/src/render.rs
+@@ -12,7 +12,7 @@
+ //! maximum form keeps its anatomy at higher totals. Quiet days alone do not change the
+ //! base anatomy. The pose and framing account for the body and fins.
+ //!
+-//! Every growth level shares one square native canvas of [`FRAME_WIDTH_PIXELS`] by
++//! Every growth level shares one native canvas of [`FRAME_WIDTH_PIXELS`] by
+ //! [`FRAME_HEIGHT_PIXELS`], which the encoders in [`crate::output`] scale up exactly.
+ //! Anatomical proportions live here; pigments, bodies, and palettes in [`crate::coat`];
+ //! streak mark strengths in [`crate::markings`]; poses in [`crate::motion`].
+@@ -27,9 +27,9 @@ use crate::koi::{
+ use crate::motion::{Course, STILL_POSE, SwimPose, calculate_swim_pose, frame_count};
+ 
+ /// Width of the native canvas every koi is drawn on, at every growth level.
+-pub const FRAME_WIDTH_PIXELS: u32 = 256;
+-/// Height of the native canvas; the canvas is square.
+-pub const FRAME_HEIGHT_PIXELS: u32 = FRAME_WIDTH_PIXELS;
++pub const FRAME_WIDTH_PIXELS: u32 = 768;
++/// Height of the native canvas; a wide pond for a README's full width.
++pub const FRAME_HEIGHT_PIXELS: u32 = 256;
+ 
+ /// A renderer-owned, fixed-size frame with row-major RGBA pixels.
+ #[derive(Debug, Eq, PartialEq)]
 @@ -44,9 +44,8 @@ impl KoiFrame {
          self.rgba_pixels.as_flattened()
      }
@@ -844,3 +887,16 @@ index 93f0305..df99a13 100644
      }
  }
  
+diff --git a/tests/render.rs b/tests/render.rs
+index e43fe7a..9dde2da 100644
+--- a/tests/render.rs
++++ b/tests/render.rs
+@@ -496,7 +496,7 @@ fn png_output_doubles_each_pixel_and_repeats_exactly() {
+         .unwrap();
+     let mut decoded_pixels = vec![0; png_reader.output_buffer_size().unwrap()];
+     let frame_info = png_reader.next_frame(&mut decoded_pixels).unwrap();
+-    assert_eq!((frame_info.width, frame_info.height), (512, 512));
++    assert_eq!((frame_info.width, frame_info.height), (1536, 512));
+     assert_eq!(frame_info.color_type, png::ColorType::Rgba);
+     for (pixel_index, native_channels) in koi_frame
+         .as_rgba_bytes()
