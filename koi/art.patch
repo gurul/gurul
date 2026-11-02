@@ -1,6 +1,6 @@
 diff --git a/examples/avoiding-pair.rs b/examples/avoiding-pair.rs
 new file mode 100644
-index 0000000..fed9ecb
+index 0000000..3d2cfa7
 --- /dev/null
 +++ b/examples/avoiding-pair.rs
 @@ -0,0 +1,789 @@
@@ -632,10 +632,10 @@ index 0000000..fed9ecb
 +                buffer.extend_from_slice(&row);
 +            }
 +        }
-+        let elapsed = |index: usize| (index as u16 * 200 + 15) / 30;
++        let elapsed = |index: usize| (index * 200 + 15) / 30;
 +        encoder
 +            .write_frame(&gif::Frame {
-+                delay: elapsed(frame_index + 1) - elapsed(frame_index),
++                delay: (elapsed(frame_index + 1) - elapsed(frame_index)) as u16,
 +                dispose: gif::DisposalMethod::Keep,
 +                transparent: Some(CLEAR_INDEX),
 +                left: (left * scale) as u16,
